@@ -10,6 +10,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 0.85,
     stock: 45,
     category: 'Beverages',
+    categories: ['Beverages', 'Bakery & Dessert'],
     icon: '☕',
     color: 'amber',
     threshold: 10
@@ -22,6 +23,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 1.20,
     stock: 30,
     category: 'Beverages',
+    categories: ['Beverages'],
     icon: '🍵',
     color: 'emerald',
     threshold: 8
@@ -34,6 +36,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 1.50,
     stock: 4, // low stock to trigger warnings out of the box!
     category: 'Beverages',
+    categories: ['Beverages'],
     icon: '🥭',
     color: 'orange',
     threshold: 6
@@ -46,6 +49,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 0.50,
     stock: 60,
     category: 'Beverages',
+    categories: ['Beverages'],
     icon: '🥤',
     color: 'blue',
     threshold: 15
@@ -60,6 +64,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 3.20,
     stock: 25,
     category: 'Fast Food',
+    categories: ['Fast Food'],
     icon: '🍔',
     color: 'rose',
     threshold: 10
@@ -72,6 +77,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 0.90,
     stock: 40,
     category: 'Fast Food',
+    categories: ['Fast Food'],
     icon: '🍟',
     color: 'yellow',
     threshold: 12
@@ -84,6 +90,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 4.10,
     stock: 5, // low stock trigger
     category: 'Fast Food',
+    categories: ['Fast Food'],
     icon: '🍗',
     color: 'red',
     threshold: 8
@@ -98,6 +105,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 0.70,
     stock: 18,
     category: 'Bakery & Dessert',
+    categories: ['Bakery & Dessert'],
     icon: '🥐',
     color: 'amber',
     threshold: 5
@@ -110,6 +118,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 0.60,
     stock: 15,
     category: 'Bakery & Dessert',
+    categories: ['Bakery & Dessert', 'Fast Food'],
     icon: '🍩',
     color: 'pink',
     threshold: 6
@@ -122,6 +131,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 1.10,
     stock: 8,
     category: 'Bakery & Dessert',
+    categories: ['Bakery & Dessert'],
     icon: '🍰',
     color: 'violet',
     threshold: 4
@@ -136,6 +146,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 12.00,
     stock: 12,
     category: 'Electronics',
+    categories: ['Electronics'],
     icon: '🖱️',
     color: 'teal',
     threshold: 3
@@ -148,6 +159,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 30.00,
     stock: 7,
     category: 'Electronics',
+    categories: ['Electronics'],
     icon: '⌨️',
     color: 'indigo',
     threshold: 3
@@ -162,6 +174,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 18.00,
     stock: 14,
     category: 'Apparel',
+    categories: ['Apparel'],
     icon: '🧥',
     color: 'sky',
     threshold: 5
@@ -174,6 +187,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     cost: 6.00,
     stock: 2, // low stock trigger
     category: 'Apparel',
+    categories: ['Apparel'],
     icon: '🧢',
     color: 'purple',
     threshold: 4

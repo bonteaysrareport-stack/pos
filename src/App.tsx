@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ActiveSection, Product, CartItem, SaleTransaction, SystemNotification } from './types';
+import { ActiveSection, Product, CartItem, SaleTransaction, SystemNotification, Employee, EmployeeShift } from './types';
 import { INITIAL_PRODUCTS } from './data/mockProducts';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -9,6 +9,13 @@ import SalesHistory from './components/SalesHistory';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import SettingsPanel from './components/SettingsPanel';
 import ReportsManager from './components/ReportsManager';
+import EmployeeShifts from './components/EmployeeShifts';
+
+const INITIAL_EMPLOYEES: Employee[] = [
+  { id: 'EMP001', name: 'Alexander Wright', role: 'Store Manager', status: 'Active' },
+  { id: 'EMP002', name: 'Sophia Sterling', role: 'Senior Cashier', status: 'Active' },
+  { id: 'EMP003', name: 'Marcus Sterling', role: 'Sales Associate', status: 'Active' }
+];
 
 export default function App() {
   // Navigation active tab
@@ -20,6 +27,10 @@ export default function App() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
+  
+  // Shifts and Employees States
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [shifts, setShifts] = useState<EmployeeShift[]>([]);
   
   // Search bar state sync (passed down to active POS/Inventory views)
   const [searchFilter, setSearchFilter] = useState('');
@@ -48,6 +59,30 @@ export default function App() {
       }
     } else {
       setTransactions([]);
+    }
+
+    // Employees Directory init
+    const cachedEmployees = localStorage.getItem('notus_employees');
+    if (cachedEmployees) {
+      try {
+        setEmployees(JSON.parse(cachedEmployees));
+      } catch (e) {
+        setEmployees(INITIAL_EMPLOYEES);
+      }
+    } else {
+      setEmployees(INITIAL_EMPLOYEES);
+    }
+
+    // Active & Historical Shifts init
+    const cachedShifts = localStorage.getItem('notus_shifts');
+    if (cachedShifts) {
+      try {
+        setShifts(JSON.parse(cachedShifts));
+      } catch (e) {
+        setShifts([]);
+      }
+    } else {
+      setShifts([]);
     }
 
     // Notifications Center init
@@ -92,6 +127,14 @@ export default function App() {
   }, [transactions]);
 
   useEffect(() => {
+    localStorage.setItem('notus_employees', JSON.stringify(employees));
+  }, [employees]);
+
+  useEffect(() => {
+    localStorage.setItem('notus_shifts', JSON.stringify(shifts));
+  }, [shifts]);
+
+  useEffect(() => {
     localStorage.setItem('notus_notifications', JSON.stringify(notifications));
   }, [notifications]);
 
@@ -127,6 +170,12 @@ export default function App() {
             e.preventDefault();
             setActiveSection('sales');
             dispatchNotification('Hotkey: Opened Sales History & Audits 📜', 'info');
+            break;
+          case 'f':
+            // Prevent default page search in browser and open Shifts
+            e.preventDefault();
+            setActiveSection('shifts');
+            dispatchNotification('Hotkey: Opened Employee Shifts tracking dashboard ⏰', 'info');
             break;
           case 'a':
             // Override Ctrl+A default (select-all) ONLY if user is not active inside an input box
@@ -281,9 +330,13 @@ export default function App() {
     localStorage.removeItem('notus_products');
     localStorage.removeItem('notus_transactions');
     localStorage.removeItem('notus_notifications');
+    localStorage.removeItem('notus_employees');
+    localStorage.removeItem('notus_shifts');
     setCart([]);
     setProducts(INITIAL_PRODUCTS);
     setTransactions([]);
+    setEmployees(INITIAL_EMPLOYEES);
+    setShifts([]);
     setNotifications([
       {
         id: `n-welcome-${Date.now()}`,
@@ -338,6 +391,8 @@ export default function App() {
                 searchFilter={searchFilter}
                 onCheckout={handleCheckoutComplete}
                 triggerSystemWarning={(txt) => dispatchNotification(txt, 'warning')}
+                employees={employees}
+                shifts={shifts}
               />
             )}
 
@@ -356,6 +411,19 @@ export default function App() {
               <SalesHistory 
                 transactions={transactions}
                 onRefundTransaction={handleRefundTransaction}
+                employees={employees}
+                setTransactions={setTransactions}
+              />
+            )}
+
+            {activeSection === 'shifts' && (
+              <EmployeeShifts 
+                employees={employees}
+                setEmployees={setEmployees}
+                shifts={shifts}
+                setShifts={setShifts}
+                transactions={transactions}
+                dispatchNotification={(text, type) => dispatchNotification(text, type)}
               />
             )}
 

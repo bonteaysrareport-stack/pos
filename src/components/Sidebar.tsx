@@ -8,7 +8,8 @@ import {
   X, 
   Store,
   AlertCircle,
-  FileText
+  FileText,
+  Clock
 } from 'lucide-react';
 import { ActiveSection, Product } from '../types';
 
@@ -58,6 +59,14 @@ export default function Sidebar({
       color: 'text-amber-600',
       desc: 'Receipts & audits',
       shortcut: 'S'
+    },
+    { 
+      id: 'shifts' as ActiveSection, 
+      label: 'Employee Shifts', 
+      icon: Clock, 
+      color: 'text-violet-600',
+      desc: 'Check-in & active shifts',
+      shortcut: 'F'
     },
     { 
       id: 'analytics' as ActiveSection, 

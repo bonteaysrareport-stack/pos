@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   Undo2
 } from 'lucide-react';
-import { Product, CartItem, SaleTransaction } from '../types';
+import { Product, CartItem, SaleTransaction, Employee, EmployeeShift } from '../types';
 import { CATEGORIES, DISCOUNT_CODES } from '../data/mockProducts';
 
 interface POSTerminalProps {
@@ -26,6 +26,8 @@ interface POSTerminalProps {
   searchFilter: string;
   onCheckout: (transaction: SaleTransaction) => void;
   triggerSystemWarning: (text: string) => void;
+  employees: Employee[];
+  shifts: EmployeeShift[];
 }
 
 export default function POSTerminal({
@@ -34,28 +36,72 @@ export default function POSTerminal({
   setCart,
   searchFilter,
   onCheckout,
-  triggerSystemWarning
+  triggerSystemWarning,
+  employees = [],
+  shifts = []
 }: POSTerminalProps) {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [discountCode, setDiscountCode] = useState('');
   const [selectedPayment, setSelectedPayment] = useState<'Cash' | 'Card' | 'Mobile Pay'>('Cash');
   const [cashTendered, setCashTendered] = useState<string>('');
   
+  // Choose Employee State
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
+  const [manualEmployeeId, setManualEmployeeId] = useState<string>('');
+
+  const activeEmployees = useMemo(() => {
+    return shifts.filter(s => !s.checkOutTime);
+  }, [shifts]);
+
   // Checkout & Receipt Modal States
   const [isCheckoutProcessing, setIsCheckoutProcessing] = useState(false);
   const [recentInvoice, setRecentInvoice] = useState<SaleTransaction | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [printFormat, setPrintFormat] = useState<'thermal' | 'detailed'>('thermal');
+  const [sortBy, setSortBy] = useState<'name' | 'price-asc' | 'price-desc' | 'stock' | 'category' | 'sku'>('name');
 
-  // Filter products based on Category & Search Filter
+  // Calculate live product counts per category in POS terminal view
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: products.length };
+    CATEGORIES.filter(c => c !== 'All').forEach(cat => {
+      counts[cat] = products.filter(p => 
+        (p.categories && p.categories.includes(cat)) || p.category === cat
+      ).length;
+    });
+    return counts;
+  }, [products]);
+
+  // Filter and sort products based on selected Category and search filters
   const filteredProducts = useMemo(() => {
-    return products.filter(product => {
-      const matchCategory = selectedCategory === 'All' || product.category === selectedCategory;
+    const list = products.filter(product => {
+      const matchCategory = selectedCategory === 'All' || 
+                            (product.categories && product.categories.includes(selectedCategory)) || 
+                            product.category === selectedCategory;
       const matchSearch = product.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
                           product.sku.toLowerCase().includes(searchFilter.toLowerCase());
       return matchCategory && matchSearch;
     });
-  }, [products, selectedCategory, searchFilter]);
+
+    // Apply active sort specifications
+    return [...list].sort((a, b) => {
+      if (sortBy === 'name') {
+        return a.name.localeCompare(b.name);
+      } else if (sortBy === 'price-asc') {
+        return a.price - b.price;
+      } else if (sortBy === 'price-desc') {
+        return b.price - a.price;
+      } else if (sortBy === 'stock') {
+        return a.stock - b.stock;
+      } else if (sortBy === 'category') {
+        const catA = a.category || '';
+        const catB = b.category || '';
+        return catA.localeCompare(catB);
+      } else if (sortBy === 'sku') {
+        return a.sku.localeCompare(b.sku);
+      }
+      return 0;
+    });
+  }, [products, selectedCategory, searchFilter, sortBy]);
 
   // Compute Cart Financial Sums
   const subtotal = useMemo(() => {
@@ -176,6 +222,25 @@ export default function POSTerminal({
       }
     }
 
+    // Resolve employee cashier identity
+    let assignedId = undefined;
+    let assignedName = undefined;
+
+    if (selectedEmployeeId && selectedEmployeeId !== 'manual') {
+      assignedId = selectedEmployeeId;
+      const actEmp = activeEmployees.find(e => e.employeeId === selectedEmployeeId);
+      assignedName = actEmp ? actEmp.employeeName : undefined;
+    } else if (manualEmployeeId.trim()) {
+      assignedId = manualEmployeeId.trim().toUpperCase();
+      const generalEmp = employees.find(e => e.id === assignedId);
+      assignedName = generalEmp ? generalEmp.name : `Cashier ${assignedId}`;
+    }
+
+    if (!assignedId) {
+      triggerSystemWarning('Please assign a Cashier / Employee ID for this transaction checkout.');
+      return;
+    }
+
     setIsCheckoutProcessing(true);
 
     // Formulate final transaction parameters
@@ -206,7 +271,9 @@ export default function POSTerminal({
       profitAmount: finalProfit,
       paymentMethod: selectedPayment,
       cashReceived: selectedPayment === 'Cash' ? cashVal : totalAmount,
-      changeDue: selectedPayment === 'Cash' ? computedChange : 0
+      changeDue: selectedPayment === 'Cash' ? computedChange : 0,
+      employeeId: assignedId,
+      employeeName: assignedName
     };
 
     setTimeout(() => {
@@ -259,30 +326,66 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 min-h-[calc(100vh-5rem)] p-4 md:p-6 bg-slate-50/50">
       
       {/* LEFT COLUMN: CATEGORIES + PRODUCTS (Col span 7/12 on large desktops) */}
-      <div className="xl:col-span-7 flex flex-col space-y-6">
+      <div className="xl:col-span-7 flex flex-col md:flex-row gap-5">
         
-        {/* Categories Bar Panel */}
-        <div className="bg-white border border-stone-200 rounded-xl p-3 shadow-xs">
-          <div className="flex gap-2 overflow-x-auto scroller pb-1.5 pt-1">
-            {CATEGORIES.map((category) => (
-              <button
-                key={category}
-                id={`cat-filter-${category.toLowerCase().replace(/\s+/g, '-')}`}
-                onClick={() => setSelectedCategory(category)}
-                className={`text-xs px-4 py-2.5 rounded-lg font-medium whitespace-nowrap transition-all duration-150 cursor-pointer ${
-                  selectedCategory === category
-                    ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100 font-bold'
-                    : 'bg-stone-50 text-stone-600 hover:bg-stone-100 hover:text-stone-900 border border-stone-200/50'
-                }`}
-              >
-                {category}
-              </button>
-            ))}
+        {/* Modern left Filtering Sidebar inside left column */}
+        <div className="w-full md:w-52 shrink-0 bg-white border border-stone-200 rounded-xl p-4 shadow-2xs flex flex-col space-y-4 h-fit md:sticky md:top-20">
+          <div>
+            <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1.5">
+              Categories
+            </span>
+            <div className="flex md:flex-col gap-1 overflow-x-auto md:overflow-visible scroller">
+              {CATEGORIES.map((category) => {
+                const isSelected = selectedCategory === category;
+                const count = categoryCounts[category] || 0;
+                return (
+                  <button
+                    key={category}
+                    id={`cat-filter-${category.toLowerCase().replace(/\s+/g, '-')}`}
+                    onClick={() => setSelectedCategory(category)}
+                    className={`text-xs px-3 py-2.5 rounded-lg font-semibold text-left transition-all cursor-pointer flex items-center justify-between whitespace-nowrap md:whitespace-normal w-full shrink-0 ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white shadow-xs shadow-indigo-100 font-bold'
+                        : 'bg-stone-50 md:bg-transparent text-stone-600 hover:bg-stone-50 hover:text-stone-950 border border-stone-200/50 md:border-transparent'
+                    }`}
+                  >
+                    <span>{category}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
+                      isSelected ? 'bg-indigo-700 text-white' : 'bg-stone-100 text-stone-500'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <hr className="border-stone-100 hidden md:block" />
+
+          {/* Sorter controls */}
+          <div className="space-y-1.5">
+            <label htmlFor="pos-sort-by" className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">
+              Sort Catalog By
+            </label>
+            <select
+              id="pos-sort-by"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="w-full text-xs bg-stone-50 text-stone-900 border border-stone-200 p-2 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-hidden font-semibold cursor-pointer"
+            >
+              <option value="name">Product Title (A-Z)</option>
+              <option value="category">Category Grouping</option>
+              <option value="price-asc">Price: Low to High</option>
+              <option value="price-desc">Price: High to Low</option>
+              <option value="stock">Stock Level (low first)</option>
+              <option value="sku">SKU Code Sequence</option>
+            </select>
           </div>
         </div>
 
         {/* Product Catalog Registry Grid */}
-        <div className="flex-1">
+        <div className="flex-1 flex flex-col space-y-4">
           {filteredProducts.length === 0 ? (
             <div className="bg-white border border-stone-200 rounded-xl p-12 text-center shadow-xs">
               <p className="text-stone-400 text-sm">No products found matching filters.</p>
@@ -538,6 +641,60 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
               )}
             </div>
 
+            {/* Cashier Assignment */}
+            <div className="mt-4 pt-4 border-t border-stone-100">
+              <label htmlFor="checkout-cashier-select" className="text-[10px] font-bold text-stone-500 uppercase tracking-wider block mb-1.5">
+                Assign Order Cashier *
+              </label>
+              {activeEmployees.length === 0 ? (
+                <div className="p-3 bg-amber-50 text-amber-800 border border-amber-200/50 rounded-xl text-[10px] font-semibold leading-relaxed">
+                  ⚠️ No active staff clocked in. Please clock in at the "Employee Shifts" section, or input an Employee ID code below to associate:
+                  <input
+                    id="checkout-cashier-manual-input"
+                    type="text"
+                    placeholder="Enter Employee ID..."
+                    value={manualEmployeeId}
+                    onChange={(e) => {
+                      setManualEmployeeId(e.target.value);
+                      setSelectedEmployeeId('manual');
+                    }}
+                    className="mt-1.5 w-full text-xs p-2 bg-white border border-stone-200 text-stone-900 rounded-lg focus:ring-1 focus:ring-indigo-500 font-bold"
+                  />
+                </div>
+              ) : (
+                <select
+                  id="checkout-cashier-select"
+                  value={selectedEmployeeId}
+                  onChange={(e) => {
+                    setSelectedEmployeeId(e.target.value);
+                    if (e.target.value !== 'manual') {
+                      setManualEmployeeId('');
+                    }
+                  }}
+                  className="w-full text-xs bg-white text-stone-900 border border-stone-200 p-2 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-hidden font-semibold cursor-pointer"
+                >
+                  <option value="">-- Choose Sales Cache/Server --</option>
+                  {activeEmployees.map(emp => (
+                    <option key={emp.employeeId} value={emp.employeeId}>
+                      {emp.employeeName} (ID: {emp.employeeId})
+                    </option>
+                  ))}
+                  <option value="manual">-- Custom Employee ID Override --</option>
+                </select>
+              )}
+
+              {selectedEmployeeId === 'manual' && activeEmployees.length > 0 && (
+                <input
+                  id="checkout-cashier-manual-input-override"
+                  type="text"
+                  placeholder="Enter custom Employee ID..."
+                  value={manualEmployeeId}
+                  onChange={(e) => setManualEmployeeId(e.target.value)}
+                  className="mt-2 w-full text-xs p-2 bg-white border border-stone-200 text-stone-905 rounded-lg focus:ring-1 focus:ring-indigo-500 font-bold"
+                />
+              )}
+            </div>
+
             {/* Payment Method Selector Grid */}
             <div className="mt-4">
               <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider block mb-1.5">
@@ -759,7 +916,7 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
                     <div className="flex justify-between"><span>DATE / TIME:</span><span>{recentInvoice.timestamp}</span></div>
                     <div className="flex justify-between"><span>INVOICE ID:</span><span className="font-bold text-stone-800">{recentInvoice.invoiceNo}</span></div>
                     <div className="flex justify-between"><span>REGISTER:</span><span>STATION-01-A</span></div>
-                    <div className="flex justify-between"><span>DUTY CLERK:</span><span>John Doe-012</span></div>
+                    <div className="flex justify-between"><span>DUTY CLERK:</span><span>{recentInvoice.employeeName ? `${recentInvoice.employeeName} (${recentInvoice.employeeId})` : 'SYSTEM OPERATOR'}</span></div>
                     <div className="flex justify-between"><span>PAYMENT METHOD:</span><span>{recentInvoice.paymentMethod}</span></div>
                   </div>
 
@@ -856,7 +1013,7 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
                     <div>
                       <span className="font-bold text-stone-400 uppercase tracking-wider block text-[9px] mb-1">Billed From</span>
                       <strong className="text-stone-800 block text-xs">Notus Station Terminal-1A</strong>
-                      <span className="text-stone-500">Clerk Operative: John Doe (ID: 012)</span>
+                      <span className="text-stone-500">Clerk Operative: {recentInvoice.employeeName || 'System Operator'} (ID: {recentInvoice.employeeId || 'ST-1A'})</span>
                     </div>
                     <div className="text-right">
                       <span className="font-bold text-stone-400 uppercase tracking-wider block text-[9px] mb-1">Billed To</span>

@@ -17,22 +17,68 @@ import {
   Printer,
   Download
 } from 'lucide-react';
-import { SaleTransaction, TransactionItem } from '../types';
+import { SaleTransaction, TransactionItem, Employee } from '../types';
 
 interface SalesHistoryProps {
   transactions: SaleTransaction[];
   onRefundTransaction: (transactionId: string) => void;
+  employees?: Employee[];
+  setTransactions?: React.Dispatch<React.SetStateAction<SaleTransaction[]>>;
 }
 
 export default function SalesHistory({
   transactions,
-  onRefundTransaction
+  onRefundTransaction,
+  employees = [],
+  setTransactions
 }: SalesHistoryProps) {
   const [searchInvoice, setSearchInvoice] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('All');
   
   // Modal for receipt display
   const [selectedReceipt, setSelectedReceipt] = useState<SaleTransaction | null>(null);
+
+  // States for cashier retroactive assignment
+  const [editingTxId, setEditingTxId] = useState<string | null>(null);
+  const [newEmployeeIdForTx, setNewEmployeeIdForTx] = useState<string>('');
+  const [customEmployeeIdForTx, setCustomEmployeeIdForTx] = useState<string>('');
+
+  const handleUpdateTxEmployee = (txId: string) => {
+    let resolvedId = '';
+    let resolvedName = '';
+
+    if (newEmployeeIdForTx && newEmployeeIdForTx !== 'custom') {
+      resolvedId = newEmployeeIdForTx;
+      const emp = employees.find(e => e.id === newEmployeeIdForTx);
+      resolvedName = emp ? emp.name : `Cashier ${resolvedId}`;
+    } else if (customEmployeeIdForTx.trim()) {
+      resolvedId = customEmployeeIdForTx.trim().toUpperCase();
+      const emp = employees.find(e => e.id === resolvedId);
+      resolvedName = emp ? emp.name : `Cashier ${resolvedId}`;
+    }
+
+    if (!resolvedId) {
+      alert('Please select or specify a valid Employee ID.');
+      return;
+    }
+
+    if (setTransactions) {
+      setTransactions(prev => prev.map(t => {
+        if (t.id === txId) {
+          return {
+            ...t,
+            employeeId: resolvedId,
+            employeeName: resolvedName
+          };
+        }
+        return t;
+      }));
+    }
+
+    setEditingTxId(null);
+    setNewEmployeeIdForTx('');
+    setCustomEmployeeIdForTx('');
+  };
 
   // Filter computations
   const filteredTransactions = useMemo(() => {
@@ -151,6 +197,7 @@ export default function SalesHistory({
                 <th className="py-4 px-6">Invoice Identifier</th>
                 <th className="py-4 px-4">Completion Date</th>
                 <th className="py-4 px-4">Sold Items list</th>
+                <th className="py-4 px-4">Responsible Server</th>
                 <th className="py-4 px-4 text-center">Tender Type</th>
                 <th className="py-4 px-4 text-right">Deducted Promo</th>
                 <th className="py-4 px-4 text-right">Bill Total</th>
@@ -161,7 +208,7 @@ export default function SalesHistory({
             <tbody className="divide-y divide-stone-100 text-xs text-stone-600">
               {filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-stone-400">
+                  <td colSpan={8} className="py-12 text-center text-stone-400">
                     No matching sales records located inside our active database.
                   </td>
                 </tr>
@@ -192,6 +239,94 @@ export default function SalesHistory({
                           </p>
                           <span className="text-[10px] text-stone-400">{itemsCount} units total</span>
                         </div>
+                      </td>
+
+                      {/* Cashier Assignment */}
+                      <td className="py-3 px-4 relative">
+                        {tx.employeeId ? (
+                          <div className="flex items-center gap-1.5 justify-between">
+                            <div>
+                              <span className="font-bold text-stone-800">{tx.employeeName || 'Assigned'}</span>
+                              <span className="text-[9px] text-stone-400 font-mono block">ID: {tx.employeeId}</span>
+                            </div>
+                            <button
+                              id={`reassign-btn-${tx.id}`}
+                              onClick={() => {
+                                setEditingTxId(editingTxId === tx.id ? null : tx.id);
+                                setNewEmployeeIdForTx('');
+                                setCustomEmployeeIdForTx('');
+                              }}
+                              className="text-stone-400 hover:text-indigo-600 bg-stone-50 hover:bg-stone-100 p-1 rounded-md transition-colors text-[10px] border border-stone-200 cursor-pointer"
+                              title="Re-assign cashier"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 justify-between">
+                            <span className="text-stone-400 italic">Unassigned</span>
+                            <button
+                              id={`assign-btn-${tx.id}`}
+                              onClick={() => {
+                                setEditingTxId(editingTxId === tx.id ? null : tx.id);
+                                setNewEmployeeIdForTx('');
+                                setCustomEmployeeIdForTx('');
+                              }}
+                              className="bg-indigo-50 hover:bg-slate-100 text-indigo-700 border border-indigo-200 text-[10px] px-1.5 py-1 rounded-md font-bold cursor-pointer"
+                            >
+                              + Assign
+                            </button>
+                          </div>
+                        )}
+
+                        {editingTxId === tx.id && (
+                          <div className="absolute top-full left-0 bg-white border border-stone-200 shadow-xl rounded-xl p-3.5 z-40 mt-1 w-48 flex flex-col gap-2.5 animate-in fade-in slide-in-from-top-1">
+                            <span className="text-[9px] font-bold text-stone-400 uppercase tracking-wider block">Associate Server</span>
+                            
+                            {employees && employees.length > 0 ? (
+                              <select
+                                id={`assign-select-${tx.id}`}
+                                value={newEmployeeIdForTx}
+                                onChange={(e) => setNewEmployeeIdForTx(e.target.value)}
+                                className="text-[11px] p-1.5 bg-stone-50 border border-stone-200 rounded font-medium focus:ring-1 focus:ring-indigo-500 text-stone-800"
+                              >
+                                <option value="">-- Choose Staff --</option>
+                                {employees.map(e => (
+                                  <option key={e.id} value={e.id}>{e.name} ({e.id})</option>
+                                ))}
+                                <option value="custom">-- Custom manually --</option>
+                              </select>
+                            ) : null}
+
+                            {(!employees || employees.length === 0 || newEmployeeIdForTx === 'custom') && (
+                              <input
+                                id={`assign-input-${tx.id}`}
+                                type="text"
+                                placeholder="Enter Employee ID..."
+                                value={customEmployeeIdForTx}
+                                onChange={(e) => setCustomEmployeeIdForTx(e.target.value)}
+                                className="text-[11px] p-1.5 border border-stone-200 rounded font-bold uppercase focus:ring-1 focus:ring-indigo-500 text-stone-900"
+                              />
+                            )}
+
+                            <div className="flex gap-1.5 justify-end pt-1">
+                              <button
+                                id={`assign-cancel-${tx.id}`}
+                                onClick={() => setEditingTxId(null)}
+                                className="text-[9px] text-stone-500 hover:bg-stone-50 px-2 py-1 border border-stone-200 rounded-md font-semibold cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                id={`assign-save-${tx.id}`}
+                                onClick={() => handleUpdateTxEmployee(tx.id)}
+                                className="text-[9px] bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-md font-extrabold cursor-pointer"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </td>
 
                       {/* Tender selection */}
@@ -291,7 +426,7 @@ export default function SalesHistory({
                 <div className="space-y-0.5 border-b border-stone-100 py-3 text-[10px] text-stone-500">
                   <div className="flex justify-between"><span>DATE / TIME:</span><span>{selectedReceipt.timestamp}</span></div>
                   <div className="flex justify-between"><span>INVOICE NO:</span><span className="font-bold text-stone-800">{selectedReceipt.invoiceNo}</span></div>
-                  <div className="flex justify-between"><span>DUTY CLERK:</span><span>John Doe-012</span></div>
+                  <div className="flex justify-between"><span>DUTY CLERK:</span><span>{selectedReceipt.employeeName ? `${selectedReceipt.employeeName} (${selectedReceipt.employeeId})` : 'SYSTEM OPERATOR'}</span></div>
                   <div className="flex justify-between"><span>PAY TYPE:</span><span>{selectedReceipt.paymentMethod}</span></div>
                 </div>
 

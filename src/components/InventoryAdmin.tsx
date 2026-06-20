@@ -35,6 +35,10 @@ export default function InventoryAdmin({
   searchFilter
 }: InventoryAdminProps) {
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [sortBy, setSortBy] = useState<'name' | 'sku' | 'cost' | 'price' | 'stock' | 'category'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [showLowStockOnly, setShowLowStockOnly] = useState(false);
+  const [showOutOfStockOnly, setShowOutOfStockOnly] = useState(false);
   
   // Modals / Editor States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -47,20 +51,62 @@ export default function InventoryAdmin({
   const [formPrice, setFormPrice] = useState('');
   const [formCost, setFormCost] = useState('');
   const [formStock, setFormStock] = useState('');
-  const [formCategory, setFormCategory] = useState('Beverages');
+  const [formCategories, setFormCategories] = useState<string[]>(['Beverages']);
   const [formIcon, setFormIcon] = useState('☕');
   const [formColor, setFormColor] = useState('amber');
   const [formThreshold, setFormThreshold] = useState('10');
 
-  // Filter lists based on Category and searchFilter
+  // Calculate live product counts per category in real-time
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: products.length };
+    CATEGORIES.filter(c => c !== 'All').forEach(cat => {
+      counts[cat] = products.filter(p => 
+        (p.categories && p.categories.includes(cat)) || p.category === cat
+      ).length;
+    });
+    return counts;
+  }, [products]);
+
+  // Filter and sort products based on selected Category and search filters
   const filteredProducts = useMemo(() => {
-    return products.filter(product => {
-      const matchCategory = selectedCategory === 'All' || product.category === selectedCategory;
+    const list = products.filter(product => {
+      // support multi-category check
+      const matchCategory = selectedCategory === 'All' || 
+                            (product.categories && product.categories.includes(selectedCategory)) || 
+                            product.category === selectedCategory;
       const matchSearch = product.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
                           product.sku.toLowerCase().includes(searchFilter.toLowerCase());
-      return matchCategory && matchSearch;
+      
+      const isOutOfStock = product.stock <= 0;
+      const isLowStock = !isOutOfStock && product.stock <= product.threshold;
+      
+      const matchLowStock = !showLowStockOnly || isLowStock;
+      const matchOutOfStock = !showOutOfStockOnly || isOutOfStock;
+
+      return matchCategory && matchSearch && matchLowStock && matchOutOfStock;
     });
-  }, [products, selectedCategory, searchFilter]);
+
+    // Apply active sort specifications
+    return [...list].sort((a, b) => {
+      const coeff = sortOrder === 'asc' ? 1 : -1;
+      if (sortBy === 'name') {
+        return coeff * a.name.localeCompare(b.name);
+      } else if (sortBy === 'sku') {
+        return coeff * a.sku.localeCompare(b.sku);
+      } else if (sortBy === 'cost') {
+        return coeff * (a.cost - b.cost);
+      } else if (sortBy === 'price') {
+        return coeff * (a.price - b.price);
+      } else if (sortBy === 'stock') {
+        return coeff * (a.stock - b.stock);
+      } else if (sortBy === 'category') {
+        const catA = a.category || '';
+        const catB = b.category || '';
+        return coeff * catA.localeCompare(catB);
+      }
+      return 0;
+    });
+  }, [products, selectedCategory, searchFilter, sortBy, sortOrder, showLowStockOnly, showOutOfStockOnly]);
 
   // Form Initializers (Add vs. Edit)
   const openAddModal = () => {
@@ -70,7 +116,7 @@ export default function InventoryAdmin({
     setFormPrice('5.00');
     setFormCost('1.50');
     setFormStock('20');
-    setFormCategory('Beverages');
+    setFormCategories(['Beverages']);
     setFormIcon('☕');
     setFormColor('amber');
     setFormThreshold('5');
@@ -84,7 +130,7 @@ export default function InventoryAdmin({
     setFormPrice(product.price.toString());
     setFormCost(product.cost.toString());
     setFormStock(product.stock.toString());
-    setFormCategory(product.category);
+    setFormCategories(product.categories && product.categories.length > 0 ? product.categories : [product.category]);
     setFormIcon(product.icon);
     setFormColor(product.color);
     setFormThreshold(product.threshold.toString());
@@ -94,7 +140,7 @@ export default function InventoryAdmin({
   // Submission handlers
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim() || !formSku.trim()) return;
+    if (!formName.trim() || !formSku.trim() || formCategories.length === 0) return;
 
     const newProduct: Product = {
       id: `p-${Date.now()}`,
@@ -103,7 +149,8 @@ export default function InventoryAdmin({
       price: Math.max(0, parseFloat(formPrice) || 0),
       cost: Math.max(0, parseFloat(formCost) || 0),
       stock: Math.max(0, parseInt(formStock) || 0),
-      category: formCategory,
+      category: formCategories[0] || 'Beverages',
+      categories: formCategories,
       icon: formIcon,
       color: formColor,
       threshold: Math.max(0, parseInt(formThreshold) || 1)
@@ -115,7 +162,7 @@ export default function InventoryAdmin({
 
   const handleEditSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingProduct || !formName.trim() || !formSku.trim()) return;
+    if (!editingProduct || !formName.trim() || !formSku.trim() || formCategories.length === 0) return;
 
     const updated: Product = {
       ...editingProduct,
@@ -124,7 +171,8 @@ export default function InventoryAdmin({
       price: Math.max(0, parseFloat(formPrice) || 0),
       cost: Math.max(0, parseFloat(formCost) || 0),
       stock: Math.max(0, parseInt(formStock) || 0),
-      category: formCategory,
+      category: formCategories[0] || 'Beverages',
+      categories: formCategories,
       icon: formIcon,
       color: formColor,
       threshold: Math.max(0, parseInt(formThreshold) || 1)
@@ -143,37 +191,161 @@ export default function InventoryAdmin({
       
       {/* Top action cards & Overview */}
       <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-        {/* Category breakdown bar in inventory */}
-        <div className="bg-white border border-stone-200 rounded-xl p-1.5 shadow-xs flex items-center gap-1 overflow-x-auto max-w-full">
-          {CATEGORIES.map(cat => (
-            <button
-              key={cat}
-              id={`inv-cat-${cat.toLowerCase().replace(/\s+/g, '-')}`}
-              onClick={() => setSelectedCategory(cat)}
-              className={`text-xs px-3.5 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
-                selectedCategory === cat 
-                  ? 'bg-indigo-600 text-white font-bold'
-                  : 'text-stone-500 hover:text-stone-900 hover:bg-stone-50'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
+        <div>
+          <h2 className="text-lg font-extrabold text-stone-900 tracking-tight font-sans uppercase">
+            Store Stock Control Panel
+          </h2>
+          <p className="text-[11px] text-stone-500 mt-0.5">
+            Manage your stock bookkeeping records, replenish supplies, and category indexing.
+          </p>
         </div>
-
+        
         {/* Master Addition trigger */}
         <button
           id="add-product-modal-toggle"
           onClick={openAddModal}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 px-4 rounded-lg flex items-center gap-2 shadow-xs transition-colors cursor-pointer uppercase tracking-wider shrink-0"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-3 px-5 rounded-xl flex items-center gap-2 shadow-md shadow-indigo-100 transition-colors cursor-pointer uppercase tracking-wider shrink-0"
         >
           <Plus className="w-4 h-4" />
           Add Item catalog
         </button>
       </div>
 
-      {/* Main product stock control list */}
-      <div className="bg-white border border-stone-200 rounded-2xl shadow-xs overflow-hidden flex flex-col flex-1">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        {/* LEFT COMPACT COMPREHENSIVE SIDEBAR */}
+        <div className="lg:col-span-3 bg-white border border-stone-200 rounded-2xl p-5 shadow-xs flex flex-col space-y-5">
+          <div>
+            <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1.5">
+              Category Sidebar filters
+            </span>
+            <div className="space-y-1">
+              {CATEGORIES.map(cat => {
+                const isSelected = selectedCategory === cat;
+                const count = categoryCounts[cat] || 0;
+                return (
+                  <button
+                    key={cat}
+                    id={`inv-cat-${cat.toLowerCase().replace(/\s+/g, '-')}`}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`w-full text-left font-semibold text-xs py-2 px-3 rounded-lg flex items-center justify-between transition-all cursor-pointer ${
+                      isSelected 
+                        ? 'bg-indigo-50 border border-indigo-100 text-indigo-700 font-extrabold shadow-2xs'
+                        : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50 border border-transparent'
+                    }`}
+                  >
+                    <span className="truncate">{cat}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                      isSelected ? 'bg-indigo-200 text-indigo-800' : 'bg-stone-100 text-stone-500'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <hr className="border-stone-100" />
+
+          {/* Sorter Dropdown controls */}
+          <div className="space-y-3.5">
+            <div>
+              <label htmlFor="inv-sort-by" className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1.5">
+                Sort Records By
+              </label>
+              <select
+                id="inv-sort-by"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="w-full text-xs bg-stone-50 text-stone-900 border border-stone-200 p-2.5 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-hidden font-medium cursor-pointer"
+              >
+                <option value="name">Product Name (A-Z)</option>
+                <option value="category">Primary Category</option>
+                <option value="stock">Current Stock Levels</option>
+                <option value="price">Retail Selling Price</option>
+                <option value="cost">Purchase wholesale Cost</option>
+                <option value="sku">SKU Code Sequence</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1.5">
+                Sort Sequence
+              </label>
+              <div className="flex bg-stone-100 p-0.5 rounded-lg border border-stone-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setSortOrder('asc')}
+                  className={`flex-1 py-1.5 rounded-md font-bold text-[11px] transition-all cursor-pointer ${
+                    sortOrder === 'asc' 
+                      ? 'bg-white text-indigo-700 shadow-sm' 
+                      : 'text-stone-500 hover:text-stone-850'
+                  }`}
+                >
+                  Ascending
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSortOrder('desc')}
+                  className={`flex-1 py-1.5 rounded-md font-bold text-[11px] transition-all cursor-pointer ${
+                    sortOrder === 'desc' 
+                      ? 'bg-white text-indigo-700 shadow-sm' 
+                      : 'text-stone-500 hover:text-stone-850'
+                  }`}
+                >
+                  Descending
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <hr className="border-stone-100" />
+
+          {/* Quick stock states status filters */}
+          <div className="space-y-2.5">
+            <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block">
+              Stock Alerts & Status Filters
+            </span>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-xs text-stone-600 font-medium cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showLowStockOnly}
+                  onChange={(e) => setShowLowStockOnly(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                />
+                <span>Show Low Stock Alert</span>
+              </label>
+              
+              <label className="flex items-center gap-2 text-xs text-stone-600 font-medium cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showOutOfStockOnly}
+                  onChange={(e) => setShowOutOfStockOnly(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                />
+                <span>Show Sold Out Only</span>
+              </label>
+            </div>
+
+            {(selectedCategory !== 'All' || showLowStockOnly || showOutOfStockOnly) && (
+              <button
+                onClick={() => {
+                  setSelectedCategory('All');
+                  setShowLowStockOnly(false);
+                  setShowOutOfStockOnly(false);
+                }}
+                className="w-full mt-2 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100/60 p-2 rounded-lg transition-all text-center flex items-center justify-center gap-1 cursor-pointer"
+              >
+                Reset All Filters
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT DATA GRID & CONTROL BOOK TABLE */}
+        <div className="lg:col-span-9 bg-white border border-stone-200 rounded-2xl shadow-xs overflow-hidden flex flex-col">
         <div className="overflow-x-auto flex-1">
           <table className="w-full text-left border-collapse" id="inventory-registry-table">
             <thead>
@@ -214,9 +386,13 @@ export default function InventoryAdmin({
                             {product.icon}
                           </div>
                           <div>
-                            <span className="text-[10px] bg-stone-100 text-stone-500 font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wide">
-                              {product.category}
-                            </span>
+                            <div className="flex gap-1 flex-wrap mb-1">
+                              {(product.categories && product.categories.length > 0 ? product.categories : [product.category]).map(cat => (
+                                <span key={cat} className="text-[9px] bg-stone-105 border border-stone-200/50 text-stone-600 font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wide">
+                                  {cat}
+                                </span>
+                              ))}
+                            </div>
                             <h4 className="font-bold text-stone-800 text-xs mt-0.5" id={`inv-name-${product.id}`}>
                               {product.name}
                             </h4>
@@ -344,6 +520,7 @@ export default function InventoryAdmin({
           </span>
         </div>
       </div>
+    </div>
 
       {/* ADD NEW PRODUCT DIALOG MODAL */}
       {isAddModalOpen && (
@@ -406,21 +583,42 @@ export default function InventoryAdmin({
                   />
                 </div>
 
-                {/* Categories */}
-                <div className="space-y-1">
-                  <label htmlFor="add-category-input" className="text-[10px] font-bold text-stone-500 uppercase tracking-wide">
-                    Catalog Category
-                  </label>
-                  <select
-                    id="add-category-input"
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
-                    className="w-full text-xs bg-stone-50 text-stone-900 border border-stone-200 p-2.5 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
-                  >
-                    {CATEGORIES.filter(c => c !== 'All').map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                {/* Categories Checklist */}
+                <div className="space-y-1.5 col-span-1 md:col-span-2">
+                  <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wide block">
+                    Product Categories * (Select all that apply)
+                  </span>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+                    {CATEGORIES.filter(c => c !== 'All').map(c => {
+                      const isChecked = formCategories.includes(c);
+                      return (
+                        <label 
+                          key={c} 
+                          className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-semibold cursor-pointer transition-all select-none ${
+                            isChecked 
+                              ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-extrabold shadow-2xs' 
+                              : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFormCategories(prev => [...prev, c]);
+                              } else {
+                                if (formCategories.length > 1) {
+                                  setFormCategories(prev => prev.filter(item => item !== c));
+                                }
+                              }
+                            }}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                          />
+                          <span className="truncate">{c}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Stock Level */}
@@ -626,21 +824,42 @@ export default function InventoryAdmin({
                   />
                 </div>
 
-                {/* Categories */}
-                <div className="space-y-1">
-                  <label htmlFor="edit-category-input" className="text-[10px] font-bold text-stone-500 uppercase tracking-wide">
-                    Catalog Category
-                  </label>
-                  <select
-                    id="edit-category-input"
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
-                    className="w-full text-xs bg-stone-50 text-stone-900 border border-stone-200 p-2.5 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
-                  >
-                    {CATEGORIES.filter(c => c !== 'All').map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                {/* Categories Checklist */}
+                <div className="space-y-1.5 col-span-1 md:col-span-2">
+                  <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wide block">
+                    Product Categories * (Select all that apply)
+                  </span>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2.5 bg-stone-50 rounded-xl border border-stone-200">
+                    {CATEGORIES.filter(c => c !== 'All').map(c => {
+                      const isChecked = formCategories.includes(c);
+                      return (
+                        <label 
+                          key={c} 
+                          className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-semibold cursor-pointer transition-all select-none ${
+                            isChecked 
+                              ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-extrabold shadow-2xs' 
+                              : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFormCategories(prev => [...prev, c]);
+                              } else {
+                                if (formCategories.length > 1) {
+                                  setFormCategories(prev => prev.filter(item => item !== c));
+                                }
+                              }
+                            }}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                          />
+                          <span className="truncate">{c}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Stock Edit */}
