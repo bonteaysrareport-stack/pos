@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ActiveSection, Product, CartItem, SaleTransaction, SystemNotification, Employee, EmployeeShift, TaxConfig } from './types';
+import { ActiveSection, Product, CartItem, SaleTransaction, SystemNotification, Employee, EmployeeShift, TaxConfig, Customer } from './types';
 import { INITIAL_PRODUCTS } from './data/mockProducts';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -15,6 +15,13 @@ const INITIAL_EMPLOYEES: Employee[] = [
   { id: 'EMP001', name: 'Alexander Wright', role: 'Store Manager', status: 'Active' },
   { id: 'EMP002', name: 'Sophia Sterling', role: 'Senior Cashier', status: 'Active' },
   { id: 'EMP003', name: 'Marcus Sterling', role: 'Sales Associate', status: 'Active' }
+];
+
+const INITIAL_CUSTOMERS: Customer[] = [
+  { id: 'CUST001', name: 'Jane Doe', phone: '555-019-1111', email: 'jane.doe@gmail.com', loyaltyPoints: 320, totalSpent: 245.50, visits: 8 },
+  { id: 'CUST002', name: 'John Smith', phone: '555-019-2222', email: 'john.smith@yahoo.com', loyaltyPoints: 120, totalSpent: 98.00, visits: 3 },
+  { id: 'CUST003', name: 'Emily Davis', phone: '555-019-3333', email: 'emily.d@outlook.com', loyaltyPoints: 50, totalSpent: 45.00, visits: 2 },
+  { id: 'CUST004', name: 'Michael Brown', phone: '555-019-4444', email: 'mbrown@gmail.com', loyaltyPoints: 850, totalSpent: 620.00, visits: 14 }
 ];
 
 const DEFAULT_TAX_CONFIG: TaxConfig = {
@@ -42,6 +49,9 @@ export default function App() {
   // Shifts and Employees States
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<EmployeeShift[]>([]);
+
+  // Customers (Loyalty database) State
+  const [customers, setCustomers] = useState<Customer[]>([]);
 
   // Tax Configurations state
   const [taxConfig, setTaxConfig] = useState<TaxConfig>(DEFAULT_TAX_CONFIG);
@@ -97,6 +107,18 @@ export default function App() {
       }
     } else {
       setEmployees(INITIAL_EMPLOYEES);
+    }
+
+    // Customers Directory init
+    const cachedCustomers = localStorage.getItem('notus_customers');
+    if (cachedCustomers) {
+      try {
+        setCustomers(JSON.parse(cachedCustomers));
+      } catch (e) {
+        setCustomers(INITIAL_CUSTOMERS);
+      }
+    } else {
+      setCustomers(INITIAL_CUSTOMERS);
     }
 
     // Active & Historical Shifts init
@@ -159,6 +181,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('notus_shifts', JSON.stringify(shifts));
   }, [shifts]);
+
+  useEffect(() => {
+    localStorage.setItem('notus_customers', JSON.stringify(customers));
+  }, [customers]);
 
   useEffect(() => {
     localStorage.setItem('notus_notifications', JSON.stringify(notifications));
@@ -259,6 +285,25 @@ export default function App() {
   // Checkout Completion Callback (updates transaction list & reduces inventory stock safely)
   const handleCheckoutComplete = (tx: SaleTransaction) => {
     setTransactions(prev => [tx, ...prev]);
+
+    // Update customer stats if loyalty member is associated with this transaction
+    if (tx.customerId) {
+      setCustomers(prevCustomers => {
+        return prevCustomers.map(cust => {
+          if (cust.id === tx.customerId) {
+            const addedPoints = tx.earnedPoints || 0;
+            const subbedPoints = tx.redeemedPoints || 0;
+            return {
+              ...cust,
+              loyaltyPoints: Math.max(0, cust.loyaltyPoints + addedPoints - subbedPoints),
+              totalSpent: parseFloat((cust.totalSpent + tx.totalAmount).toFixed(2)),
+              visits: cust.visits + 1
+            };
+          }
+          return cust;
+        });
+      });
+    }
 
     // Mutate and adjust remaining inventory levels
     setProducts(prevProducts => {
@@ -363,12 +408,14 @@ export default function App() {
     localStorage.removeItem('notus_employees');
     localStorage.removeItem('notus_shifts');
     localStorage.removeItem('notus_tax_config');
+    localStorage.removeItem('notus_customers');
     setCart([]);
     setProducts(INITIAL_PRODUCTS);
     setTransactions([]);
     setEmployees(INITIAL_EMPLOYEES);
     setShifts([]);
     setTaxConfig(DEFAULT_TAX_CONFIG);
+    setCustomers(INITIAL_CUSTOMERS);
     setNotifications([
       {
         id: `n-welcome-${Date.now()}`,
@@ -426,6 +473,8 @@ export default function App() {
                 employees={employees}
                 shifts={shifts}
                 taxConfig={taxConfig}
+                customers={customers}
+                setCustomers={setCustomers}
               />
             )}
 

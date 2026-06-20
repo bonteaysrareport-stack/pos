@@ -1,6 +1,6 @@
 {
   "name": "Notus POS",
   "description": "A high-fidelity Point of Sale (POS) & Inventory Dashboard inspired by the Notus template style, featuring terminal operations, product catalog, sales charts, and log management.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Trash2, 
   Tag, 
@@ -14,9 +14,21 @@ import {
   Download,
   Printer,
   CheckCircle2,
-  Undo2
+  Undo2,
+  Camera,
+  Scan,
+  Volume2,
+  VolumeX,
+  Play,
+  StopCircle,
+  User,
+  UserPlus,
+  Award,
+  Phone,
+  Mail,
+  Search
 } from 'lucide-react';
-import { Product, CartItem, SaleTransaction, Employee, EmployeeShift, TaxConfig } from '../types';
+import { Product, CartItem, SaleTransaction, Employee, EmployeeShift, TaxConfig, Customer } from '../types';
 import { CATEGORIES, DISCOUNT_CODES } from '../data/mockProducts';
 
 interface POSTerminalProps {
@@ -29,6 +41,8 @@ interface POSTerminalProps {
   employees: Employee[];
   shifts: EmployeeShift[];
   taxConfig?: TaxConfig;
+  customers?: Customer[];
+  setCustomers?: React.Dispatch<React.SetStateAction<Customer[]>>;
 }
 
 export default function POSTerminal({
@@ -40,7 +54,9 @@ export default function POSTerminal({
   triggerSystemWarning,
   employees = [],
   shifts = [],
-  taxConfig
+  taxConfig,
+  customers = [],
+  setCustomers
 }: POSTerminalProps) {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [discountCode, setDiscountCode] = useState('');
@@ -50,6 +66,16 @@ export default function POSTerminal({
   // Choose Employee State
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
   const [manualEmployeeId, setManualEmployeeId] = useState<string>('');
+
+  // Customer Loyalty States
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+  const [redeemPoints, setRedeemPoints] = useState<boolean>(false);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState<string>('');
+  const [isAddingCustomer, setIsAddingCustomer] = useState<boolean>(false);
+  const [newCustName, setNewCustName] = useState<string>('');
+  const [newCustPhone, setNewCustPhone] = useState<string>('');
+  const [newCustEmail, setNewCustEmail] = useState<string>('');
+  const [custRegNotice, setCustRegNotice] = useState<string | null>(null);
 
   const activeEmployees = useMemo(() => {
     return shifts.filter(s => !s.checkOutTime);
@@ -61,6 +87,119 @@ export default function POSTerminal({
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [printFormat, setPrintFormat] = useState<'thermal' | 'detailed'>('thermal');
   const [sortBy, setSortBy] = useState<'name' | 'price-asc' | 'price-desc' | 'stock' | 'category' | 'sku'>('name');
+
+  // Barcode Scanner states
+  const [isScannerActive, setIsScannerActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [autoScanActive, setAutoScanActive] = useState(false);
+  const [isBeepEnabled, setIsBeepEnabled] = useState(true);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const playBeep = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
+      
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      osc.start();
+      osc.stop(ctx.currentTime + 0.12);
+    } catch (e) {
+      console.warn("Audio Context playback failed or blocked:", e);
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      setScanMessage(null);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+      });
+      setCameraStream(stream);
+      setIsScannerActive(true);
+      
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 50);
+    } catch (err) {
+      console.error("Camera access failed/denied:", err);
+      setIsScannerActive(true);
+      setScanMessage("Virtual Simulator Active: Camera blocked/not found, using simulated stream.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setIsScannerActive(false);
+    setAutoScanActive(false);
+    setScanMessage(null);
+  };
+
+  const triggerSimulatedScan = (skuCode: string) => {
+    const matched = products.find(p => p.sku.toLowerCase() === skuCode.trim().toLowerCase());
+    if (matched) {
+      if (matched.stock <= 0) {
+        setScanMessage(`⚠️ SKU [${skuCode}] (${matched.name}) is out of stock!`);
+        return;
+      }
+      
+      if (isBeepEnabled) {
+        playBeep();
+      }
+
+      addToCart(matched);
+      setScanMessage(`✅ Successfully Scanned: ${matched.name} (${skuCode})`);
+      
+      setTimeout(() => {
+        setScanMessage(prev => prev && prev.includes(skuCode) ? null : prev);
+      }, 3500);
+    } else {
+      setScanMessage(`❌ Unknown Barcode: "${skuCode}" not found in catalog.`);
+      setTimeout(() => {
+        setScanMessage(prev => prev && prev.includes(skuCode) ? null : prev);
+      }, 3500);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [cameraStream]);
+
+  useEffect(() => {
+    let intervalId: any = null;
+    if (autoScanActive && isScannerActive) {
+      intervalId = setInterval(() => {
+        const available = products.filter(p => p.stock > 0);
+        if (available.length > 0) {
+          const randomProduct = available[Math.floor(Math.random() * available.length)];
+          triggerSimulatedScan(randomProduct.sku);
+        }
+      }, 7000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [autoScanActive, isScannerActive, products]);
 
   // Calculate live product counts per category in POS terminal view
   const categoryCounts = useMemo(() => {
@@ -125,6 +264,38 @@ export default function POSTerminal({
     }
   }, [discountCode, subtotal]);
 
+  // Selected Customer reference
+  const selectedCustomer = useMemo(() => {
+    return (customers || []).find(c => c.id === selectedCustomerId) || null;
+  }, [customers, selectedCustomerId]);
+
+  // Loyalty Member 5% discount (stacks on top of promo code discounts)
+  const loyaltyDiscountAmount = useMemo(() => {
+    if (!selectedCustomer) return 0;
+    // 5% off the remaining balance after general promo discount
+    const initialReduced = Math.max(0, subtotal - discountDetails.amount);
+    return parseFloat((initialReduced * 0.05).toFixed(2));
+  }, [selectedCustomer, subtotal, discountDetails.amount]);
+
+  // Max points that can be redeemed based on remaining price
+  const maxRedeemablePoints = useMemo(() => {
+    if (!selectedCustomer) return 0;
+    const remainingAfterLoyalty = Math.max(0, subtotal - discountDetails.amount - loyaltyDiscountAmount);
+    // 10 points = $1.00 of discount
+    return Math.min(selectedCustomer.loyaltyPoints, Math.ceil(remainingAfterLoyalty * 10));
+  }, [selectedCustomer, subtotal, discountDetails.amount, loyaltyDiscountAmount]);
+
+  // Value of redeemed points ($0.10 per point)
+  const loyaltyPointsRedeemDiscount = useMemo(() => {
+    if (!selectedCustomer || !redeemPoints) return 0;
+    return parseFloat((maxRedeemablePoints * 0.10).toFixed(2));
+  }, [selectedCustomer, redeemPoints, maxRedeemablePoints]);
+
+  // Taxable base after coupon, member discount, and points redemption
+  const taxableBase = useMemo(() => {
+    return Math.max(0, subtotal - discountDetails.amount - loyaltyDiscountAmount - loyaltyPointsRedeemDiscount);
+  }, [subtotal, discountDetails.amount, loyaltyDiscountAmount, loyaltyPointsRedeemDiscount]);
+
   const taxAmount = useMemo(() => {
     const config = taxConfig || { globalRate: 8, categoryRates: {} };
     const rawTotalTax = cart.reduce((sum, item) => {
@@ -141,22 +312,38 @@ export default function POSTerminal({
     }, 0);
 
     // Scaling factor proportional to pre-tax subtotal reduction by discounts
-    const discountRatio = subtotal > 0 ? Math.max(0, subtotal - discountDetails.amount) / subtotal : 0;
+    const discountRatio = subtotal > 0 ? taxableBase / subtotal : 0;
     return rawTotalTax * discountRatio;
-  }, [cart, discountDetails, subtotal, taxConfig]);
+  }, [cart, subtotal, taxableBase, taxConfig]);
 
   const effectiveTaxRate = useMemo(() => {
-    const taxableBase = Math.max(0, subtotal - discountDetails.amount);
     if (taxableBase <= 0) {
       return taxConfig?.globalRate ?? 8;
     }
     return (taxAmount / taxableBase) * 100;
-  }, [taxAmount, subtotal, discountDetails, taxConfig]);
+  }, [taxAmount, taxableBase, taxConfig]);
 
   const totalAmount = useMemo(() => {
-    const net = subtotal - discountDetails.amount + taxAmount;
+    const net = subtotal - discountDetails.amount - loyaltyDiscountAmount - loyaltyPointsRedeemDiscount + taxAmount;
     return Math.max(0, net);
-  }, [subtotal, discountDetails, taxAmount]);
+  }, [subtotal, discountDetails.amount, loyaltyDiscountAmount, loyaltyPointsRedeemDiscount, taxAmount]);
+
+  // Points earned on the current order (1 point per dollar spent)
+  const earnedPoints = useMemo(() => {
+    return Math.floor(totalAmount);
+  }, [totalAmount]);
+
+  // Filter customers for lookup autocomplete dropdown
+  const filteredCustomers = useMemo(() => {
+    if (!customerSearchQuery) return [];
+    const query = customerSearchQuery.trim().toLowerCase();
+    return (customers || []).filter(c => 
+      c.name.toLowerCase().includes(query) || 
+      c.phone.replace(/[^0-9]/g, '').includes(query) || 
+      c.phone.includes(query) ||
+      c.email.toLowerCase().includes(query)
+    );
+  }, [customers, customerSearchQuery]);
 
   // Fast Cash Options for Payment Calculation
   const fastCashAmounts = useMemo(() => {
@@ -233,6 +420,10 @@ export default function POSTerminal({
     setCart([]);
     setDiscountCode('');
     setCashTendered('');
+    setSelectedCustomerId('');
+    setRedeemPoints(false);
+    setCustomerSearchQuery('');
+    setCustRegNotice(null);
   };
 
   // Submit Completed Transaction and Open Receipt Panel
@@ -282,15 +473,22 @@ export default function POSTerminal({
     const finalProfit = totalAmount - totalCostOfGoods;
 
     const invoiceNo = `INV-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+    
+    const codeList = [
+      discountDetails.code,
+      selectedCustomer ? 'LOYALTY_MEMBER' : '',
+      redeemPoints ? `REDEEM(${maxRedeemablePoints}pts)` : ''
+    ].filter(Boolean);
+
     const newTransaction: SaleTransaction = {
       id: `tx-${Date.now()}`,
       invoiceNo,
       timestamp: new Date().toLocaleString(),
       items: transactionItems,
       subtotal,
-      discountPercent: discountDetails.percent,
-      discountAmount: discountDetails.amount,
-      discountCode: discountDetails.code,
+      discountPercent: discountDetails.percent + (selectedCustomer ? 5 : 0),
+      discountAmount: parseFloat((discountDetails.amount + loyaltyDiscountAmount + loyaltyPointsRedeemDiscount).toFixed(2)),
+      discountCode: codeList.join(' + ') || 'None',
       taxAmount,
       totalAmount,
       profitAmount: finalProfit,
@@ -298,7 +496,11 @@ export default function POSTerminal({
       cashReceived: selectedPayment === 'Cash' ? cashVal : totalAmount,
       changeDue: selectedPayment === 'Cash' ? computedChange : 0,
       employeeId: assignedId,
-      employeeName: assignedName
+      employeeName: assignedName,
+      customerId: selectedCustomerId || undefined,
+      customerName: selectedCustomer ? selectedCustomer.name : undefined,
+      earnedPoints: selectedCustomer ? earnedPoints : undefined,
+      redeemedPoints: selectedCustomer && redeemPoints ? maxRedeemablePoints : undefined
     };
 
     setTimeout(() => {
@@ -321,13 +523,23 @@ export default function POSTerminal({
       ? (recentInvoice.taxAmount / Math.max(0.01, recentInvoice.subtotal - recentInvoice.discountAmount)) * 100 
       : 8;
     const taxRateLabel = `Tax (${computedTaxPercent.toFixed(1)}%)`.padEnd(11);
+    
+    const customerSec = recentInvoice.customerId ? `
+=========================================
+LOYALTY ACCOUNT ASSOCIATED
+Customer ID  : ${recentInvoice.customerId}
+Member Name  : ${recentInvoice.customerName}
+Points Earned: +${recentInvoice.earnedPoints || 0} pts
+Points Used  : -${recentInvoice.redeemedPoints || 0} pts
+=========================================` : '';
+
     const receiptText = `
 -----------------------------------------
             NOTUS POS TERMINAL               
             VUE ADIN KIT SYSTEM           
 -----------------------------------------
 Invoice No : ${recentInvoice.invoiceNo}
-Date       : ${recentInvoice.timestamp}
+Date       : ${recentInvoice.timestamp}${customerSec}
 =========================================
 ${recentInvoice.items.map(item => `${item.name.padEnd(24)} x${item.quantity}  $${item.total.toFixed(2)}`).join('\n')}
 =========================================
@@ -359,6 +571,148 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
         
         {/* Modern left Filtering Sidebar inside left column */}
         <div className="w-full md:w-52 shrink-0 bg-white border border-stone-200 rounded-xl p-4 shadow-2xs flex flex-col space-y-4 h-fit md:sticky md:top-20">
+          
+          {/* BARCODE SCANNER LIVE TERMINAL */}
+          <div className="border border-indigo-150 bg-indigo-50/20 rounded-xl p-3 flex flex-col space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider flex items-center gap-1.5">
+                <Scan className="w-3.5 h-3.5 text-indigo-500" /> Scanner Gateway
+              </span>
+              {isScannerActive && (
+                <span className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  <span className="text-[8px] font-extrabold text-emerald-600 uppercase tracking-widest">LIVE</span>
+                </span>
+              )}
+            </div>
+
+            {!isScannerActive ? (
+              <div className="bg-white border border-stone-200/80 rounded-lg p-2 text-center space-y-2">
+                <p className="text-[9px] text-stone-400 font-semibold leading-relaxed">
+                  Scan Product SKUs instantly via your browser camera stream.
+                </p>
+                <button
+                  id="btn-start-scanner"
+                  onClick={startCamera}
+                  className="w-full flex items-center justify-center gap-1.5 text-[10px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 px-2.5 rounded-lg transition-all cursor-pointer shadow-3xs"
+                >
+                  <Camera className="w-3 h-3" />
+                  <span>Activate Scanner</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {/* Visual Viewfinder Frame */}
+                <div className="relative rounded-lg overflow-hidden border border-stone-300 bg-black aspect-square flex items-center justify-center group shadow-inner">
+                  {cameraStream ? (
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-2 text-stone-400 bg-stone-900/95">
+                      <Camera className="w-5 h-5 text-stone-500 animate-pulse mb-1" />
+                      <span className="text-[8px] font-bold uppercase tracking-widest text-stone-400">Lens Active (Simulated)</span>
+                    </div>
+                  )}
+
+                  {/* Red Laser Overlay Line */}
+                  <div className="absolute left-0 right-0 h-0.5 bg-rose-500/80 shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-bounce pointer-events-none" style={{ top: '45%' }} />
+                </div>
+
+                {/* Scan notice display */}
+                {scanMessage && (
+                  <div className={`p-1.5 rounded-lg text-[9px] font-extrabold text-center border animate-fade-in ${
+                    scanMessage.startsWith('✅') 
+                      ? 'bg-emerald-50 border-emerald-100 text-emerald-700' 
+                      : scanMessage.startsWith('⚠️')
+                      ? 'bg-amber-50 border-amber-100 text-amber-700'
+                      : 'bg-indigo-50 border-indigo-100 text-indigo-700'
+                  }`}>
+                    {scanMessage}
+                  </div>
+                )}
+
+                {/* Controller Action buttons */}
+                <div className="flex items-center gap-1 select-none">
+                  {/* Auto loop simulation toggle */}
+                  <button
+                    id="btn-toggle-autoscan"
+                    onClick={() => {
+                      setAutoScanActive(!autoScanActive);
+                      if (!autoScanActive) {
+                        setScanMessage("🤖 Cycle-scan active (7s intervals)");
+                      } else {
+                        setScanMessage(null);
+                      }
+                    }}
+                    className={`flex-1 flex items-center justify-center gap-0.5 py-1 rounded-md text-[8px] font-bold border cursor-pointer transition-all ${
+                      autoScanActive
+                        ? 'bg-amber-50 border-amber-200 text-amber-700 font-extrabold shadow-3xs'
+                        : 'bg-white border-stone-200 text-stone-500 hover:bg-stone-50'
+                    }`}
+                    title="Simulates scanning automatic random products every 7s"
+                  >
+                    {autoScanActive ? <StopCircle className="w-2.5 h-2.5 text-amber-600 shrink-0" /> : <Play className="w-2.5 h-2.5 text-stone-400 shrink-0" />}
+                    <span>{autoScanActive ? 'Stop' : 'Auto'}</span>
+                  </button>
+
+                  {/* Sound on/off switch */}
+                  <button
+                    id="btn-toggle-scannersound"
+                    onClick={() => setIsBeepEnabled(!isBeepEnabled)}
+                    className="p-1.5 bg-white border border-stone-200 rounded-md text-stone-500 hover:bg-stone-50 cursor-pointer flex items-center justify-center"
+                    title={isBeepEnabled ? "Disable Scan Beep Alert" : "Enable Scan Beep Alert"}
+                  >
+                    {isBeepEnabled ? <Volume2 className="w-3.5 h-3.5 text-indigo-600" /> : <VolumeX className="w-3.5 h-3.5 text-stone-400" />}
+                  </button>
+
+                  {/* Stop terminal */}
+                  <button
+                    id="btn-stop-scanner-terminal"
+                    onClick={stopCamera}
+                    className="px-2 py-1 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-md text-[8px] font-bold text-rose-700 cursor-pointer whitespace-nowrap min-w-[40px]"
+                  >
+                    Stop
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Test Barcode triggers panel inside Scanner gateway */}
+            <div className="bg-white border border-stone-150 rounded-lg p-2 space-y-1">
+              <span className="text-[8px] font-extrabold text-stone-400 uppercase tracking-widest block">
+                Virtual Barcodes (Click to Scan)
+              </span>
+              
+              <div className="flex flex-wrap gap-1 max-h-[110px] overflow-y-auto pr-1">
+                {products.map((p) => (
+                  <button
+                    key={p.id}
+                    id={`btn-scan-sku-${p.sku.toLowerCase()}`}
+                    type="button"
+                    onClick={() => {
+                      if (!isScannerActive) {
+                        setIsScannerActive(true);
+                      }
+                      triggerSimulatedScan(p.sku);
+                    }}
+                    className="text-[8px] font-mono font-bold px-1 py-0.5 rounded bg-stone-50 hover:bg-indigo-50 border border-stone-200/70 hover:border-indigo-200 text-stone-700 hover:text-indigo-700 flex items-center gap-0.5 transition-all cursor-pointer"
+                    title={`Instantly scan card for SKU: ${p.sku} (${p.name})`}
+                  >
+                    <span>{p.icon}</span>
+                    <span>{p.sku}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <hr className="border-stone-150" />
+
           <div>
             <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider block mb-1.5">
               Categories
@@ -637,6 +991,268 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
         {/* COUPON & PAYMENT METHOD CHANNELS */}
         {cart.length > 0 && (
           <div className="p-4 bg-stone-50 border-t border-b border-stone-200">
+            
+            {/* CUSTOMER LOYALTY GATEWAY */}
+            <div className="mb-4 pb-4 border-b border-stone-200">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">
+                    Customer Loyalty Profile
+                  </span>
+                </div>
+                <button
+                  id="btn-toggle-customer-mode"
+                  type="button"
+                  onClick={() => {
+                    setIsAddingCustomer(!isAddingCustomer);
+                    setCustRegNotice(null);
+                  }}
+                  className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 bg-white border border-stone-200 px-2 py-0.5 rounded-md flex items-center gap-1 cursor-pointer"
+                >
+                  {isAddingCustomer ? (
+                    <>
+                      <Search className="w-2.5 h-2.5" /> Lookup Member
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-2.5 h-2.5" /> Register Shopper
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {!isAddingCustomer ? (
+                <div className="space-y-2">
+                  {/* Search Input field */}
+                  {!selectedCustomerId ? (
+                    <div className="relative">
+                      <input
+                        id="loyalty-search-input"
+                        type="text"
+                        placeholder="Search Name, Phone, or Email..."
+                        value={customerSearchQuery}
+                        onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                        className="w-full text-xs pl-8 pr-3 py-1.5 bg-white text-stone-900 border border-stone-200 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
+                      />
+                      <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-stone-400" />
+                      
+                      {/* Quick recommendations dropdown */}
+                      {customerSearchQuery && (
+                        <div className="absolute left-0 right-0 mt-1 bg-white border border-stone-200 rounded-lg shadow-lg z-30 max-h-48 overflow-y-auto divide-y divide-stone-100">
+                          {filteredCustomers.length === 0 ? (
+                            <div className="p-3 text-center text-xs text-stone-400">
+                              No registered shopper found.
+                            </div>
+                          ) : (
+                            filteredCustomers.map(c => (
+                              <button
+                                key={c.id}
+                                id={`select-cust-${c.id}`}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedCustomerId(c.id);
+                                  setCustomerSearchQuery('');
+                                }}
+                                className="w-full text-left p-2.5 hover:bg-indigo-50/50 flex flex-col items-start gap-0.5 transition-colors cursor-pointer"
+                              >
+                                <div className="flex justify-between items-center w-full">
+                                  <span className="font-bold text-xs text-stone-800">{c.name}</span>
+                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                                    {c.loyaltyPoints} pts
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] text-stone-450">
+                                  <span className="flex items-center gap-0.5"><Phone className="w-2.5 h-2.5" /> {c.phone}</span>
+                                  <span>•</span>
+                                  <span className="flex items-center gap-0.5"><Mail className="w-2.5 h-2.5" /> {c.email}</span>
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Selected Customer badge details */
+                    selectedCustomer && (
+                      <div className="p-3 bg-gradient-to-br from-indigo-50/50 to-purple-50/50 border border-indigo-100 rounded-xl space-y-2 text-xs">
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                              {selectedCustomer.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-stone-800">{selectedCustomer.name}</h4>
+                              <p className="text-[9px] text-stone-400 font-mono">Member ID: {selectedCustomer.id}</p>
+                            </div>
+                          </div>
+                          <button
+                            id="btn-unlink-customer"
+                            type="button"
+                            onClick={() => {
+                              setSelectedCustomerId('');
+                              setRedeemPoints(false);
+                            }}
+                            className="text-[9px] font-bold text-stone-400 hover:text-rose-600 bg-white hover:bg-rose-50 border border-stone-200 hover:border-rose-250 px-2 py-0.5 rounded cursor-pointer transition-colors"
+                          >
+                            Unlink
+                          </button>
+                        </div>
+
+                        {/* Loyalty points display bar */}
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-stone-200/60 text-stone-700">
+                          <div className="bg-white/80 border border-stone-150 p-1.5 rounded-lg text-center flex flex-col justify-center">
+                            <span className="text-[8px] text-stone-400 uppercase tracking-wider block font-bold">Loyalty Points</span>
+                            <span className="font-sans font-extrabold text-indigo-600 text-sm flex items-center justify-center gap-1 mt-0.5">
+                              <Award className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />
+                              {selectedCustomer.loyaltyPoints}
+                            </span>
+                            <span className="text-[8px] text-stone-440 block">Value: ${(selectedCustomer.loyaltyPoints * 0.10).toFixed(2)}</span>
+                          </div>
+                          <div className="bg-white/80 border border-stone-150 p-1.5 rounded-lg text-center flex flex-col justify-center">
+                            <span className="text-[8px] text-stone-400 uppercase tracking-wider block font-bold">Visits / Total</span>
+                            <span className="font-mono font-extrabold text-stone-750 text-xs mt-1">
+                              {selectedCustomer.visits} visits
+                            </span>
+                            <span className="text-[8px] text-stone-440 block font-semibold">${selectedCustomer.totalSpent.toFixed(2)} spent</span>
+                          </div>
+                        </div>
+
+                        {/* Instant Member discount declaration */}
+                        <div className="p-1 px-2.5 rounded-lg bg-emerald-50 text-emerald-800 text-[10px] font-bold flex items-center justify-between border border-emerald-100">
+                          <span>✓ 5% Member Reward applied</span>
+                          <span className="font-mono font-extrabold">-${loyaltyDiscountAmount.toFixed(2)}</span>
+                        </div>
+
+                        {/* Redeem Points Action */}
+                        {selectedCustomer.loyaltyPoints >= 10 ? (
+                          <div className="pt-1.5 flex items-center justify-between border-t border-dashed border-stone-200">
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <input
+                                id="chk-redeem-loyalty-points"
+                                type="checkbox"
+                                checked={redeemPoints}
+                                onChange={(e) => setRedeemPoints(e.target.checked)}
+                                className="w-3.5 h-3.5 text-indigo-650 border-stone-300 rounded focus:ring-indigo-500"
+                              />
+                              <div>
+                                <span className="text-[10px] font-bold text-stone-750 block">Redeem points for credit?</span>
+                                <span className="text-[8px] text-indigo-500 block">Use {maxRedeemablePoints} pts (save ${(maxRedeemablePoints * 0.10).toFixed(2)})</span>
+                              </div>
+                            </label>
+                            {redeemPoints && (
+                              <span className="font-mono font-extrabold text-indigo-600 text-xs">
+                                -${loyaltyPointsRedeemDiscount.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-[8px] text-stone-400 text-center italic pt-1 border-t border-stone-100">
+                            (Need 10+ points to enable shopping credit redemption)
+                          </div>
+                        )}
+                      </div>
+                    )
+                  )}
+                </div>
+              ) : (
+                /* Register New Customer Form */
+                <div className="p-3 bg-white border border-stone-250/70 rounded-xl space-y-2.5 text-xs text-stone-700">
+                  {custRegNotice && (
+                    <div className="p-1.5 px-2 rounded-lg text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 text-center">
+                      {custRegNotice}
+                    </div>
+                  )}
+                  
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-[8px] font-bold text-stone-400 uppercase tracking-wider block mb-1">Full Name *</label>
+                      <input
+                        id="new-cust-name-input"
+                        type="text"
+                        placeholder="E.g. Jane Foster"
+                        value={newCustName}
+                        onChange={(e) => setNewCustName(e.target.value)}
+                        className="w-full text-xs p-1.5 bg-white text-stone-900 border border-stone-200 rounded-lg focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[8px] font-bold text-stone-400 uppercase tracking-wider block mb-1">Phone Number *</label>
+                        <input
+                          id="new-cust-phone-input"
+                          type="text"
+                          placeholder="555-019-XXXX"
+                          value={newCustPhone}
+                          onChange={(e) => setNewCustPhone(e.target.value)}
+                          className="w-full text-xs p-1.5 bg-white text-stone-900 border border-stone-200 rounded-lg focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[8px] font-bold text-stone-400 uppercase tracking-wider block mb-1">Email address</label>
+                        <input
+                          id="new-cust-email-input"
+                          type="email"
+                          placeholder="jane@example.com"
+                          value={newCustEmail}
+                          onChange={(e) => setNewCustEmail(e.target.value)}
+                          className="w-full text-xs p-1.5 bg-white text-stone-900 border border-stone-200 rounded-lg focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    id="btn-submit-new-customer"
+                    type="button"
+                    onClick={() => {
+                      if (!newCustName.trim() || !newCustPhone.trim()) {
+                        triggerSystemWarning("Name and Phone number are required fields for registration.");
+                        return;
+                      }
+                      const checkDup = (customers || []).find(c => c.phone.replace(/[^0-9]/g, '') === newCustPhone.replace(/[^0-9]/g, ''));
+                      if (checkDup) {
+                        triggerSystemWarning(`Duplicate Phone: ${newCustPhone} is already registered under "${checkDup.name}".`);
+                        return;
+                      }
+
+                      const newCustomerObj: Customer = {
+                        id: `CUST-${Date.now().toString().slice(-4)}`,
+                        name: newCustName.trim(),
+                        phone: newCustPhone.trim(),
+                        email: newCustEmail.trim() || 'walkin@notustech.cloud',
+                        loyaltyPoints: 10, // 10 welcome points!
+                        totalSpent: 0,
+                        visits: 0
+                      };
+
+                      if (setCustomers) {
+                        setCustomers(prev => [newCustomerObj, ...prev]);
+                      }
+                      
+                      setCustRegNotice("🎉 Registration successful! Account linked (+10 welcome points).");
+                      setSelectedCustomerId(newCustomerObj.id);
+                      
+                      // Clear inputs
+                      setNewCustName('');
+                      setNewCustPhone('');
+                      setNewCustEmail('');
+                      
+                      setTimeout(() => {
+                        setIsAddingCustomer(false);
+                        setCustRegNotice(null);
+                      }, 1500);
+                    }}
+                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-[10px] uppercase tracking-wider transition-colors shadow-xs cursor-pointer"
+                  >
+                    Save & Associate Member
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Promo coupons dropdown selection */}
             <div className="flex items-center gap-2">
               <Tag className="w-3.5 h-3.5 text-stone-400" />
@@ -819,7 +1435,7 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
 
         {/* FINANCIAL SUMMARY & CHECKOUT BUTTON */}
         <div className="p-4 space-y-3 bg-white mt-auto border-t border-stone-200">
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 text-stone-700">
             <div className="flex justify-between items-center text-xs">
               <span className="text-stone-500">Cart Subtotal</span>
               <span className="font-mono font-semibold text-stone-800">${subtotal.toFixed(2)}</span>
@@ -827,8 +1443,22 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
             
             {discountDetails.amount > 0 && (
               <div className="flex justify-between items-center text-xs text-emerald-700">
-                <span className="flex items-center gap-1 font-medium">Discount ({discountDetails.code})</span>
+                <span className="flex items-center gap-1 font-medium">Promo Discount ({discountDetails.code})</span>
                 <span className="font-mono font-bold">-${discountDetails.amount.toFixed(2)}</span>
+              </div>
+            )}
+
+            {loyaltyDiscountAmount > 0 && (
+              <div className="flex justify-between items-center text-xs text-indigo-700 font-semibold">
+                <span className="flex items-center gap-1">Member Reward (5% Off)</span>
+                <span className="font-mono text-indigo-600 font-bold">-${loyaltyDiscountAmount.toFixed(2)}</span>
+              </div>
+            )}
+
+            {loyaltyPointsRedeemDiscount > 0 && (
+              <div className="flex justify-between items-center text-xs text-purple-700 font-semibold">
+                <span className="flex items-center gap-1">Credit Redeemed ({maxRedeemablePoints} pts)</span>
+                <span className="font-mono text-purple-600 font-bold">-${loyaltyPointsRedeemDiscount.toFixed(2)}</span>
               </div>
             )}
             
@@ -836,6 +1466,13 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
               <span className="flex items-center gap-1">Sales Tax ({effectiveTaxRate.toFixed(2)}%)</span>
               <span className="font-mono font-semibold text-stone-800">${taxAmount.toFixed(2)}</span>
             </div>
+
+            {selectedCustomer && earnedPoints > 0 && (
+              <div className="flex justify-between items-center text-[10px] text-amber-600 bg-amber-50/50 px-2 py-0.5 rounded border border-amber-250/20">
+                <span className="flex items-center gap-1 font-bold">★ Points to earn this sale:</span>
+                <span className="font-mono font-extrabold">+{earnedPoints} pts</span>
+              </div>
+            )}
 
             <div className="pt-2 border-t border-stone-100 flex justify-between items-center">
               <span className="font-bold text-stone-800 text-sm">Grand Total</span>
@@ -947,6 +1584,28 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
                     <div className="flex justify-between"><span>REGISTER:</span><span>STATION-01-A</span></div>
                     <div className="flex justify-between"><span>DUTY CLERK:</span><span>{recentInvoice.employeeName ? `${recentInvoice.employeeName} (${recentInvoice.employeeId})` : 'SYSTEM OPERATOR'}</span></div>
                     <div className="flex justify-between"><span>PAYMENT METHOD:</span><span>{recentInvoice.paymentMethod}</span></div>
+                    {recentInvoice.customerId && (
+                      <div className="border-t border-dashed border-stone-250 mt-1.5 pt-1.5 space-y-1 text-slate-705">
+                        <div className="flex justify-between text-indigo-600 font-bold">
+                          <span>MEMBER NAME:</span>
+                          <span>{recentInvoice.customerName}</span>
+                        </div>
+                        <div className="flex justify-between text-indigo-650">
+                          <span>MEMBER ID:</span>
+                          <span>{recentInvoice.customerId}</span>
+                        </div>
+                        <div className="flex justify-between text-amber-600">
+                          <span>PENDING PTS EARNED:</span>
+                          <span>+{recentInvoice.earnedPoints || 0} PTS</span>
+                        </div>
+                        {recentInvoice.redeemedPoints !== undefined && recentInvoice.redeemedPoints > 0 && (
+                          <div className="flex justify-between text-purple-650">
+                            <span>REDEEMED BALANCE:</span>
+                            <span>-{recentInvoice.redeemedPoints} PTS</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Items detailed breakdown list */}
@@ -1046,8 +1705,21 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
                     </div>
                     <div className="text-right">
                       <span className="font-bold text-stone-400 uppercase tracking-wider block text-[9px] mb-1">Billed To</span>
-                      <strong className="text-stone-800 block text-xs">Walk-In Retail Customer</strong>
-                      <span className="text-stone-500">Clearing Method: {recentInvoice.paymentMethod}</span>
+                      {recentInvoice.customerId ? (
+                        <>
+                          <strong className="text-indigo-600 block text-xs">{recentInvoice.customerName}</strong>
+                          <span className="text-stone-500 block">Loyalty ID: {recentInvoice.customerId}</span>
+                          <span className="text-[10px] text-amber-600 font-semibold block">Bonus Earned: +{recentInvoice.earnedPoints || 0} pts</span>
+                          {recentInvoice.redeemedPoints !== undefined && recentInvoice.redeemedPoints > 0 && (
+                            <span className="text-[10px] text-purple-600 font-semibold block">Redemption Credit: -{recentInvoice.redeemedPoints} pts</span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <strong className="text-stone-800 block text-xs">Walk-In Retail Customer</strong>
+                          <span className="text-stone-500">Clearing Method: {recentInvoice.paymentMethod}</span>
+                        </>
+                      )}
                     </div>
                   </div>
 

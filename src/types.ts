@@ -43,6 +43,20 @@ export interface SaleTransaction {
   changeDue?: number;
   employeeId?: string; // associated employee ID for audit
   employeeName?: string; // associated employee name for audit
+  customerId?: string; // customer reference
+  customerName?: string; // customer name reference
+  earnedPoints?: number; // points earned this transaction
+  redeemedPoints?: number; // points redeemed or used this transaction
+}
+
+export interface Customer {
+  id: string; // e.g. "CUST001"
+  name: string;
+  phone: string;
+  email: string;
+  loyaltyPoints: number;
+  totalSpent: number;
+  visits: number;
 }
 
 export interface Employee {
