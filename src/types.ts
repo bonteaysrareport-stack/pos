@@ -70,4 +70,9 @@ export interface SystemNotification {
   read: boolean;
 }
 
+export interface TaxConfig {
+  globalRate: number;
+  categoryRates: Record<string, number>;
+}
+
 export type ActiveSection = 'pos' | 'inventory' | 'sales' | 'analytics' | 'reports' | 'shifts' | 'settings';

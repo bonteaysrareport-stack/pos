@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ActiveSection, Product, CartItem, SaleTransaction, SystemNotification, Employee, EmployeeShift } from './types';
+import { ActiveSection, Product, CartItem, SaleTransaction, SystemNotification, Employee, EmployeeShift, TaxConfig } from './types';
 import { INITIAL_PRODUCTS } from './data/mockProducts';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -17,6 +17,17 @@ const INITIAL_EMPLOYEES: Employee[] = [
   { id: 'EMP003', name: 'Marcus Sterling', role: 'Sales Associate', status: 'Active' }
 ];
 
+const DEFAULT_TAX_CONFIG: TaxConfig = {
+  globalRate: 8,
+  categoryRates: {
+    'Beverages': 5,
+    'Fast Food': 10,
+    'Bakery & Dessert': 6,
+    'Electronics': 12,
+    'Apparel': 8
+  }
+};
+
 export default function App() {
   // Navigation active tab
   const [activeSection, setActiveSection] = useState<ActiveSection>('pos');
@@ -31,6 +42,9 @@ export default function App() {
   // Shifts and Employees States
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<EmployeeShift[]>([]);
+
+  // Tax Configurations state
+  const [taxConfig, setTaxConfig] = useState<TaxConfig>(DEFAULT_TAX_CONFIG);
   
   // Search bar state sync (passed down to active POS/Inventory views)
   const [searchFilter, setSearchFilter] = useState('');
@@ -59,6 +73,18 @@ export default function App() {
       }
     } else {
       setTransactions([]);
+    }
+
+    // Tax Configurations init
+    const cachedTax = localStorage.getItem('notus_tax_config');
+    if (cachedTax) {
+      try {
+        setTaxConfig(JSON.parse(cachedTax));
+      } catch (e) {
+        setTaxConfig(DEFAULT_TAX_CONFIG);
+      }
+    } else {
+      setTaxConfig(DEFAULT_TAX_CONFIG);
     }
 
     // Employees Directory init
@@ -137,6 +163,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('notus_notifications', JSON.stringify(notifications));
   }, [notifications]);
+
+  useEffect(() => {
+    localStorage.setItem('notus_tax_config', JSON.stringify(taxConfig));
+  }, [taxConfig]);
 
   // 3. Global Keyboard Event Listener for Navigation Shortcuts
   useEffect(() => {
@@ -332,11 +362,13 @@ export default function App() {
     localStorage.removeItem('notus_notifications');
     localStorage.removeItem('notus_employees');
     localStorage.removeItem('notus_shifts');
+    localStorage.removeItem('notus_tax_config');
     setCart([]);
     setProducts(INITIAL_PRODUCTS);
     setTransactions([]);
     setEmployees(INITIAL_EMPLOYEES);
     setShifts([]);
+    setTaxConfig(DEFAULT_TAX_CONFIG);
     setNotifications([
       {
         id: `n-welcome-${Date.now()}`,
@@ -393,6 +425,7 @@ export default function App() {
                 triggerSystemWarning={(txt) => dispatchNotification(txt, 'warning')}
                 employees={employees}
                 shifts={shifts}
+                taxConfig={taxConfig}
               />
             )}
 
@@ -446,6 +479,8 @@ export default function App() {
               <SettingsPanel 
                 onFactoryReset={handleFactoryReset}
                 triggerSystemWarning={(txt) => dispatchNotification(txt, 'warning')}
+                taxConfig={taxConfig}
+                setTaxConfig={setTaxConfig}
               />
             )}
           </div>

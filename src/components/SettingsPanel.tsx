@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Building, 
   MapPin, 
@@ -12,31 +12,57 @@ import {
   HelpCircle,
   Cpu
 } from 'lucide-react';
+import { TaxConfig } from '../types';
 
 interface SettingsPanelProps {
   onFactoryReset: () => void;
   triggerSystemWarning: (text: string) => void;
+  taxConfig: TaxConfig;
+  setTaxConfig: React.Dispatch<React.SetStateAction<TaxConfig>>;
 }
+
+const APP_CATEGORIES = ['Beverages', 'Fast Food', 'Bakery & Dessert', 'Electronics', 'Apparel'];
 
 export default function SettingsPanel({
   onFactoryReset,
-  triggerSystemWarning
+  triggerSystemWarning,
+  taxConfig,
+  setTaxConfig
 }: SettingsPanelProps) {
   
   // Configuration UI state elements
-  const [storeName, setStoreName] = useState('Notus Terminal Kit');
-  const [storeAddress, setStoreAddress] = useState('123 Corporate Blvd, Ste 400');
-  const [storePhone, setStorePhone] = useState('(555) 019-2834');
-  const [taxRate, setTaxRate] = useState('8');
-  const [currency, setCurrency] = useState('USD ($)');
+  const [storeName, setStoreName] = useState(() => localStorage.getItem('notus_store_name') || 'Notus Terminal Kit');
+  const [storeAddress, setStoreAddress] = useState(() => localStorage.getItem('notus_store_address') || '123 Corporate Blvd, Ste 400');
+  const [storePhone, setStorePhone] = useState(() => localStorage.getItem('notus_store_phone') || '(555) 019-2834');
+  const [currency, setCurrency] = useState(() => localStorage.getItem('notus_currency') || 'USD ($)');
   const [activeSaveAlert, setActiveSaveAlert] = useState(false);
+
+  // Tax rates states locally
+  const [globalTaxRate, setGlobalTaxRate] = useState<number>(taxConfig.globalRate);
+  const [categoryTaxRates, setCategoryTaxRates] = useState<Record<string, number>>(taxConfig.categoryRates || {});
+
+  useEffect(() => {
+    setGlobalTaxRate(taxConfig.globalRate);
+    setCategoryTaxRates(taxConfig.categoryRates || {});
+  }, [taxConfig]);
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
+    localStorage.setItem('notus_store_name', storeName);
+    localStorage.setItem('notus_store_address', storeAddress);
+    localStorage.setItem('notus_store_phone', storePhone);
+    localStorage.setItem('notus_currency', currency);
+
+    // Save tax configurations to unified state
+    setTaxConfig({
+      globalRate: globalTaxRate,
+      categoryRates: categoryTaxRates
+    });
+
     setActiveSaveAlert(true);
     setTimeout(() => {
       setActiveSaveAlert(false);
-    }, 2500);
+    }, 2505);
   };
 
   const handleResetAction = () => {
@@ -118,24 +144,27 @@ export default function SettingsPanel({
             </div>
 
             {/* Calculations metrics defaults */}
-            <div className="space-y-3 pt-4 border-t border-stone-100">
+            <div className="space-y-4 pt-4 border-t border-stone-100">
               <span className="text-[10px] font-bold text-stone-400 tracking-wider uppercase block">
                 Tender Tax & Currency parameters
               </span>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 
-                {/* Tax level */}
+                {/* Global Tax level */}
                 <div className="space-y-1">
                   <label htmlFor="tax-rate" className="text-[10px] font-semibold text-stone-500 uppercase tracking-wide flex items-center gap-1">
-                    <Percent className="w-3.5 h-3.5 text-indigo-500" /> Sales Tax Rate (%)
+                    <Percent className="w-3.5 h-3.5 text-indigo-500" /> Default Global Tax Rate (%)
                   </label>
                   <input
                     id="tax-rate"
                     type="number"
-                    value={taxRate}
-                    onChange={(e) => setTaxRate(e.target.value)}
-                    className="w-full text-xs bg-stone-50 text-stone-900 border border-stone-200 p-2.5 rounded-lg focus:ring-1 focus:ring-indigo-500 font-mono"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={globalTaxRate}
+                    onChange={(e) => setGlobalTaxRate(parseFloat(e.target.value) || 0)}
+                    className="w-full text-xs bg-stone-50 text-stone-900 border border-stone-200 p-2.5 rounded-lg focus:ring-1 focus:ring-indigo-500 font-mono font-bold"
                   />
                 </div>
 
@@ -148,7 +177,7 @@ export default function SettingsPanel({
                     id="currency"
                     value={currency}
                     onChange={(e) => setCurrency(e.target.value)}
-                    className="w-full text-xs bg-stone-50 text-stone-900 border border-stone-200 p-2.5 rounded-lg focus:ring-1 focus:ring-indigo-500"
+                    className="w-full text-xs bg-stone-50 text-stone-900 border border-stone-200 p-2.5 rounded-lg focus:ring-1 focus:ring-indigo-500 font-semibold"
                   >
                     <option value="USD ($)">USD ($) - United States Dollar</option>
                     <option value="EUR (€)">EUR (€) - Euro Zone</option>
@@ -158,6 +187,83 @@ export default function SettingsPanel({
                 </div>
 
               </div>
+
+              {/* Category-specific Tax Rates */}
+              <div className="space-y-3 pt-4 border-t border-stone-100">
+                <div>
+                  <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider block">
+                    Category-Specific Tax Overrides & Rates
+                  </span>
+                  <p className="text-[10px] text-stone-400 mt-0.5">
+                    Define custom sales tax rates for specific product divisions. If disabled, they fallback to default global tax rate.
+                  </p>
+                </div>
+
+                <div className="bg-stone-50/50 rounded-xl border border-stone-250 overflow-hidden divide-y divide-stone-200/50">
+                  {APP_CATEGORIES.map((catKey) => {
+                    const isOverridden = categoryTaxRates[catKey] !== undefined;
+
+                    return (
+                      <div key={catKey} className="p-3 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        {/* Name and checkbox switch */}
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            id={`override-${catKey}`}
+                            checked={isOverridden}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              const updated = { ...categoryTaxRates };
+                              if (checked) {
+                                updated[catKey] = globalTaxRate; // Initialize with current global fallback
+                              } else {
+                                delete updated[catKey];
+                              }
+                              setCategoryTaxRates(updated);
+                            }}
+                            className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-stone-300 cursor-pointer"
+                          />
+                          <label htmlFor={`override-${catKey}`} className="font-bold text-stone-750 cursor-pointer">
+                            Customize {catKey} tax rate
+                          </label>
+                        </div>
+
+                        {/* Input or Badge */}
+                        <div className="flex items-center gap-2">
+                          {isOverridden ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-indigo-600 font-semibold uppercase">Custom Override:</span>
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  max="100"
+                                  value={categoryTaxRates[catKey]}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    setCategoryTaxRates(prev => ({
+                                      ...prev,
+                                      [catKey]: isNaN(val) ? 0 : val
+                                    }));
+                                  }}
+                                  className="w-20 p-1.5 text-right font-mono bg-stone-50 border border-stone-200 text-stone-900 rounded-md focus:ring-1 focus:ring-indigo-500 font-bold pr-5 text-xs"
+                                />
+                                <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] font-bold text-stone-400 pointer-events-none">%</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-md bg-stone-100 text-stone-500 text-[10px] font-semibold border border-stone-200">
+                              Inherits Global ({globalTaxRate}%)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
             </div>
 
             {/* Form Save alerts / action */}

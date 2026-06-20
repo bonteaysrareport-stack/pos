@@ -107,6 +107,75 @@ export default function SalesHistory({
     alert(`Rerouting Print Spooler to duplicate invoice: ${invoice.invoiceNo}\nPrint Spooler active.`);
   };
 
+  const handleExportToCSV = () => {
+    if (transactions.length === 0) {
+      alert("No transaction records available to export.");
+      return;
+    }
+
+    const headers = [
+      "Transaction ID",
+      "Invoice Number",
+      "Timestamp",
+      "Items Summary",
+      "Subtotal ($)",
+      "Discount Code",
+      "Discount Amount ($)",
+      "Tax Amount ($)",
+      "Total Amount ($)",
+      "Profit Amount ($)",
+      "Payment Method",
+      "Cashier ID",
+      "Cashier Name"
+    ];
+
+    const escapeCSV = (val: string | number | undefined | null) => {
+      if (val === undefined || val === null) return '""';
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return `"${str}"`;
+    };
+
+    const rows = transactions.map(t => {
+      const itemsStr = t.items
+        .map(item => `${item.quantity}x ${item.name} ($${item.price.toFixed(2)} ea)`)
+        .join('; ');
+
+      return [
+        escapeCSV(t.id),
+        escapeCSV(t.invoiceNo),
+        escapeCSV(t.timestamp),
+        escapeCSV(itemsStr),
+        escapeCSV(t.subtotal.toFixed(2)),
+        escapeCSV(t.discountCode || 'None'),
+        escapeCSV(t.discountAmount.toFixed(2)),
+        escapeCSV(t.taxAmount.toFixed(2)),
+        escapeCSV(t.totalAmount.toFixed(2)),
+        escapeCSV(t.profitAmount.toFixed(2)),
+        escapeCSV(t.paymentMethod),
+        escapeCSV(t.employeeId || 'SYSTEM'),
+        escapeCSV(t.employeeName || 'SYSTEM OPERATOR')
+      ];
+    });
+
+    const csvContent = [
+      headers.map(h => `"${h}"`).join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Notus_Sales_Export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="p-4 md:p-6 bg-slate-50/50 min-h-[calc(100vh-5rem)] space-y-6">
       
@@ -126,22 +195,34 @@ export default function SalesHistory({
           />
         </div>
 
-        {/* Payment Select Pill Buttons */}
-        <div className="flex gap-1.5 overflow-x-auto self-start md:self-center">
-          {['All', 'Cash', 'Card', 'Mobile Pay'].map((meth) => (
-            <button
-              key={meth}
-              id={`history-filter-${meth.toLowerCase().replace(/\s+/g, '-')}`}
-              onClick={() => setPaymentFilter(meth)}
-              className={`text-[11px] font-bold px-3 py-2 rounded-lg border cursor-pointer transition-all ${
-                paymentFilter === meth
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                  : 'bg-stone-50 text-stone-500 border-stone-200 hover:bg-stone-100'
-              }`}
-            >
-              {meth}
-            </button>
-          ))}
+        {/* Payment Select Pill Buttons & Export Option */}
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-start md:justify-end">
+          <div className="flex gap-1.5 overflow-x-auto">
+            {['All', 'Cash', 'Card', 'Mobile Pay'].map((meth) => (
+              <button
+                key={meth}
+                id={`history-filter-${meth.toLowerCase().replace(/\s+/g, '-')}`}
+                onClick={() => setPaymentFilter(meth)}
+                className={`text-[11px] font-bold px-3 py-2 rounded-lg border cursor-pointer transition-all ${
+                  paymentFilter === meth
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-stone-50 text-stone-500 border-stone-200 hover:bg-stone-100'
+                }`}
+              >
+                {meth}
+              </button>
+            ))}
+          </div>
+
+          <button
+            id="btn-export-csv"
+            onClick={handleExportToCSV}
+            className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80 transition-all cursor-pointer shadow-3xs"
+            title="Export absolute sales ledger to CSV formatted file"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export CSV</span>
+          </button>
         </div>
       </div>
 
@@ -460,7 +541,7 @@ export default function SalesHistory({
                     </div>
                   )}
                   <div className="flex justify-between">
-                    <span>Sales Tax (8%):</span>
+                    <span>Sales Tax ({(selectedReceipt.subtotal > 0 ? (selectedReceipt.taxAmount / Math.max(0.01, selectedReceipt.subtotal - selectedReceipt.discountAmount)) * 100 : 8).toFixed(1)}%):</span>
                     <span>${selectedReceipt.taxAmount.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-sm text-stone-950 font-bold border-t border-stone-100 pt-2 font-sans">

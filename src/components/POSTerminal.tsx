@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   Undo2
 } from 'lucide-react';
-import { Product, CartItem, SaleTransaction, Employee, EmployeeShift } from '../types';
+import { Product, CartItem, SaleTransaction, Employee, EmployeeShift, TaxConfig } from '../types';
 import { CATEGORIES, DISCOUNT_CODES } from '../data/mockProducts';
 
 interface POSTerminalProps {
@@ -28,6 +28,7 @@ interface POSTerminalProps {
   triggerSystemWarning: (text: string) => void;
   employees: Employee[];
   shifts: EmployeeShift[];
+  taxConfig?: TaxConfig;
 }
 
 export default function POSTerminal({
@@ -38,7 +39,8 @@ export default function POSTerminal({
   onCheckout,
   triggerSystemWarning,
   employees = [],
-  shifts = []
+  shifts = [],
+  taxConfig
 }: POSTerminalProps) {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [discountCode, setDiscountCode] = useState('');
@@ -124,9 +126,32 @@ export default function POSTerminal({
   }, [discountCode, subtotal]);
 
   const taxAmount = useMemo(() => {
+    const config = taxConfig || { globalRate: 8, categoryRates: {} };
+    const rawTotalTax = cart.reduce((sum, item) => {
+      const itemPrice = item.product.price;
+      const itemQty = item.quantity;
+      const category = item.product.category;
+      
+      const rate = (config.categoryRates && config.categoryRates[category] !== undefined)
+        ? config.categoryRates[category]
+        : config.globalRate;
+        
+      const itemTax = (itemPrice * itemQty) * (rate / 100);
+      return sum + itemTax;
+    }, 0);
+
+    // Scaling factor proportional to pre-tax subtotal reduction by discounts
+    const discountRatio = subtotal > 0 ? Math.max(0, subtotal - discountDetails.amount) / subtotal : 0;
+    return rawTotalTax * discountRatio;
+  }, [cart, discountDetails, subtotal, taxConfig]);
+
+  const effectiveTaxRate = useMemo(() => {
     const taxableBase = Math.max(0, subtotal - discountDetails.amount);
-    return taxableBase * 0.08; // Flat 8% tax rate
-  }, [subtotal, discountDetails]);
+    if (taxableBase <= 0) {
+      return taxConfig?.globalRate ?? 8;
+    }
+    return (taxAmount / taxableBase) * 100;
+  }, [taxAmount, subtotal, discountDetails, taxConfig]);
 
   const totalAmount = useMemo(() => {
     const net = subtotal - discountDetails.amount + taxAmount;
@@ -292,6 +317,10 @@ export default function POSTerminal({
 
   const handleReceiptDownloadSimulation = () => {
     if (!recentInvoice) return;
+    const computedTaxPercent = recentInvoice.subtotal > 0 
+      ? (recentInvoice.taxAmount / Math.max(0.01, recentInvoice.subtotal - recentInvoice.discountAmount)) * 100 
+      : 8;
+    const taxRateLabel = `Tax (${computedTaxPercent.toFixed(1)}%)`.padEnd(11);
     const receiptText = `
 -----------------------------------------
             NOTUS POS TERMINAL               
@@ -304,7 +333,7 @@ ${recentInvoice.items.map(item => `${item.name.padEnd(24)} x${item.quantity}  $$
 =========================================
 Subtotal   : $${recentInvoice.subtotal.toFixed(2)}
 Discount   : -$${recentInvoice.discountAmount.toFixed(2)} (${recentInvoice.discountCode || 'N/A'})
-Tax (8%)   : $${recentInvoice.taxAmount.toFixed(2)}
+${taxRateLabel}: $${recentInvoice.taxAmount.toFixed(2)}
 -----------------------------------------
 TOTAL PAID : $${recentInvoice.totalAmount.toFixed(2)}
 Method     : ${recentInvoice.paymentMethod}
@@ -804,7 +833,7 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
             )}
             
             <div className="flex justify-between items-center text-xs text-stone-500">
-              <span className="flex items-center gap-1">Sales Tax (8%)</span>
+              <span className="flex items-center gap-1">Sales Tax ({effectiveTaxRate.toFixed(2)}%)</span>
               <span className="font-mono font-semibold text-stone-800">${taxAmount.toFixed(2)}</span>
             </div>
 
@@ -950,7 +979,7 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
                       </div>
                     )}
                     <div className="flex justify-between">
-                      <span>TAX CALCULATED (8%):</span>
+                      <span>TAX CALCULATED ({(recentInvoice.subtotal > 0 ? (recentInvoice.taxAmount / Math.max(0.01, recentInvoice.subtotal - recentInvoice.discountAmount)) * 100 : 8).toFixed(1)}%):</span>
                       <span>${recentInvoice.taxAmount.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-sm text-stone-950 font-extrabold border-t border-dashed border-stone-300 pt-2 font-sans">
@@ -1066,7 +1095,7 @@ Change Due : $${(recentInvoice.changeDue || 0).toFixed(2)}
                         </div>
                       )}
                       <div className="flex justify-between">
-                        <span>Applicable Sales Tax (8.00%):</span>
+                        <span>Applicable Sales Tax ({(recentInvoice.subtotal > 0 ? (recentInvoice.taxAmount / Math.max(0.01, recentInvoice.subtotal - recentInvoice.discountAmount)) * 100 : 8).toFixed(2)}%):</span>
                         <span className="font-semibold text-stone-800">${recentInvoice.taxAmount.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-xs text-indigo-700 font-extrabold border-t border-indigo-100 pt-2.5 font-sans">
